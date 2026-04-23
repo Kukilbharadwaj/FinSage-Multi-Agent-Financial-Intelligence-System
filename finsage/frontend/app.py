@@ -5,6 +5,9 @@ import streamlit as st
 import httpx
 import time
 import uuid
+import os
+
+API_BASE_URL = os.getenv("FINSAGE_API_URL", "http://localhost:8000")
 
 # ─── Page Config ───
 st.set_page_config(
@@ -105,7 +108,7 @@ if st.button("🔍 Analyze", type="primary", use_container_width=True, disabled=
                 start_time = time.time()
 
                 response = httpx.post(
-                    "http://localhost:8000/api/chat",
+                    f"{API_BASE_URL}/api/chat",
                     json={"user_id": st.session_state.user_id, "query": query.strip()},
                     timeout=120.0,
                 )
