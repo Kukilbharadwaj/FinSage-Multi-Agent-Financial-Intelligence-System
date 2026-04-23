@@ -1,0 +1,106 @@
+INSURANCE AND LOAN RULES IN INDIA
+====================================
+
+TERM INSURANCE
+---------------
+What: Pure life cover with no investment/savings component.
+Purpose: Financial protection for family in case of policyholder's death.
+
+Key Rules:
+- Coverage: 10-15x annual income (e.g., ₹15 LPA salary → ₹1.5 to ₹2 Cr cover)
+- Premium: ₹500-1,000/month for ₹1 Cr cover at age 25-30 (non-smoker)
+- Buying online gives 30-50% lower premium than offline
+- Claim Settlement Ratio: Choose insurer with >95% CSR
+- Top insurers: HDFC Life, ICICI Prudential, Max Life, Tata AIA, LIC
+- Tax benefit: Premium deductible under Section 80C (up to ₹1.5 lakh)
+- Maturity: No payout if policyholder survives — that's why it's cheapest
+- Riders: Add critical illness, accidental death rider for extra protection
+
+DO NOT BUY:
+- ULIPs (Unit Linked Insurance Plans) — poor returns, high charges
+- Endowment plans — returns of 4-5% are below inflation
+- Money-back policies — worst of both insurance and investment
+- Rule: Keep insurance and investment SEPARATE
+
+HEALTH INSURANCE
+-----------------
+What: Covers hospitalization expenses, surgeries, and treatments.
+
+Key Rules:
+- Minimum cover: ₹5 lakh individual, ₹10 lakh family floater
+- Super top-up: Add ₹25-50 lakh super top-up at low premium for major illnesses
+- Pre-existing diseases: Covered after 2-4 year waiting period
+- No Claim Bonus: Cover increases 10-50% for each claim-free year
+- Network hospitals: Cashless treatment at network hospitals
+- Section 80D deduction:
+  - Self/spouse/children (below 60): Up to ₹25,000
+  - Self (senior citizen 60+): Up to ₹50,000
+  - Parents (below 60): Additional ₹25,000
+  - Parents (60+): Additional ₹50,000
+  - Maximum total: ₹1,00,000 per year
+  - Preventive health check-up: ₹5,000 included within above limits
+- Corporate insurance is NOT enough: Buy personal cover separately
+- Buy early: Premium increases with age, pre-existing conditions may cause rejection
+
+HOME LOAN RULES
+-----------------
+Interest Rates (2024-25):
+- SBI: 8.50-9.65% p.a.
+- HDFC: 8.75-9.65% p.a.
+- ICICI: 8.75-9.85% p.a.
+- Rates linked to repo rate (RBI sets this)
+
+Tax Benefits:
+- Section 24(b): Interest paid on home loan — up to ₹2,00,000 deduction (self-occupied property)
+- Section 80C: Principal repayment — up to ₹1,50,000 deduction (within 80C overall limit)
+- Section 80EEA: Additional ₹1,50,000 interest deduction for first-time home buyers (stamp duty value up to ₹45 lakh) — available under old regime only
+- For let-out property: Entire interest amount deductible with no upper limit
+
+EMI Calculation Formula:
+- EMI = [P × R × (1+R)^N] / [(1+R)^N – 1]
+- P = Principal loan amount, R = Monthly interest rate, N = Number of months
+- Example: ₹50 lakh loan, 8.5% for 20 years → EMI ≈ ₹43,391
+
+Tips:
+- Choose floating rate (not fixed) — historically cheaper over long term
+- Make prepayments whenever possible — saves lakhs in interest
+- Keep EMI below 40% of monthly income
+- Tenure: 15-20 years is optimal (avoid 30 years — too much interest)
+
+EDUCATION LOAN
+-----------------
+Tax Benefit — Section 80E:
+- Interest paid on education loan is fully deductible (NO upper limit)
+- Available for 8 years from the year of first repayment
+- Loan must be for higher education (in India or abroad)
+- Available for self, spouse, or children
+- Available in BOTH old and new tax regimes
+
+PERSONAL LOAN
+--------------
+- No tax benefit (since it's unsecured)
+- Interest rates: 10-24% p.a. (much higher than home/education loan)
+- Avoid personal loans for investments — high interest eats returns
+- Use only for genuine emergencies if no emergency fund available
+
+CAR LOAN
+----------
+- No tax benefit for salaried individuals
+- Interest rates: 7.5-12% p.a.
+- Down payment: Min 10-20% of car price
+- Tip: Always negotiate interest rate — banks have room to reduce
+- Rule: Car EMI should not exceed 10% of monthly income
+
+CIBIL SCORE (CREDIT SCORE)
+============================
+- Range: 300-900
+- 750+: Good score — best loan rates and approval chances
+- 650-750: Average — may get loans at higher interest rates
+- Below 650: Poor — loan rejection likely
+- Factors affecting score: Payment history (35%), credit utilization (30%), credit age (15%), credit mix (10%), enquiries (10%)
+- Tips to improve:
+  1. Pay all EMIs and credit card bills on time
+  2. Keep credit utilization below 30% of limit
+  3. Don't apply for multiple loans/cards in short period
+  4. Maintain old credit card accounts (credit age matters)
+  5. Check CIBIL report annually for errors — free at cibil.com

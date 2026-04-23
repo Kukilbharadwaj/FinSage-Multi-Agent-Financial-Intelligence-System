@@ -13,12 +13,20 @@ class AgentState(TypedDict):
     raw_query: str                         # the original user question unchanged
 
     # Intent classification results
-    intent: str                            # one of: salary, stock, index, tax, general
-    entities: dict                         # extracted: {stock, amount, index} — may be empty
+    intent: str                            # one of: salary, stock, index, tax, trading, mutual_fund, insurance, loan, retirement, gold, crypto, general
+    entities: dict                         # extracted: {stock, amount, index, fund_name} — may be empty
 
     # Market data
     market_data: Optional[dict]            # price, change, high, low, 52w high/low, source
+    company_profile: Optional[dict]        # fundamental data: P/E, EPS, market cap, sector, etc.
     ohlcv: Optional[dict]                  # close, high, low, volume, dates lists for charts
+    intraday_data: Optional[dict]          # 5-min candle data for intraday analysis
+
+    # Options / F&O data
+    options_chain: Optional[dict]          # calls, puts, PCR, max pain, OI data
+
+    # Mutual fund data
+    mutual_fund_data: Optional[dict]       # NAV, returns, fund house, category
 
     # News and sentiment
     news: Optional[list]                   # list of {title, source, link} dicts
@@ -29,6 +37,8 @@ class AgentState(TypedDict):
     sentiment_score: Optional[float]       # -1.0 (very negative) to 1.0 (very positive)
     salary_plan: Optional[dict]            # {plan: str} with monthly breakdown
     tax_result: Optional[str]              # tax calculation narrative from qwq reasoning
+    trading_analysis: Optional[str]        # intraday/options trading analysis
+    general_finance_result: Optional[str]  # insurance, loan, retirement, gold, crypto answers
 
     # Final output
     recommendation: Optional[str]          # the final formatted answer shown to user

@@ -1,0 +1,106 @@
+INDIAN MUTUAL FUND RULES AND GUIDELINES
+==========================================
+
+TYPES OF MUTUAL FUNDS IN INDIA
+-------------------------------
+
+1. EQUITY MUTUAL FUNDS:
+   - Large Cap Fund: Must invest min 80% in top 100 companies by market cap
+   - Mid Cap Fund: Must invest min 65% in 101st-250th companies by market cap
+   - Small Cap Fund: Must invest min 65% in 251st company onwards by market cap
+   - Multi Cap Fund: Must invest min 25% each in large, mid, and small cap (SEBI mandate)
+   - Flexi Cap Fund: Can invest across any market cap with no minimum allocation
+   - Focused Fund: Can hold maximum 30 stocks
+   - ELSS (Equity Linked Savings Scheme): 3-year lock-in, tax saving under 80C, min 80% in equity
+   - Sectoral/Thematic Fund: Invest in specific sector (IT, pharma, banking, etc.)
+   - Value Fund: Follows value investing strategy
+   - Contra Fund: Takes contrarian bets
+
+2. DEBT MUTUAL FUNDS:
+   - Liquid Fund: Invests in instruments up to 91 days, instant redemption up to ₹50,000
+   - Overnight Fund: Invests in 1-day maturity instruments, lowest risk
+   - Ultra Short Duration: Macaulay duration 3-6 months
+   - Short Duration: Macaulay duration 1-3 years
+   - Corporate Bond Fund: Min 80% in AA+ rated bonds
+   - Banking & PSU Fund: Min 80% in bank/PSU/PFI debt
+   - Gilt Fund: Min 80% in government securities
+   - Dynamic Bond Fund: Actively managed duration
+
+3. HYBRID MUTUAL FUNDS:
+   - Balanced Advantage Fund (BAF): Dynamically manages equity-debt allocation
+   - Aggressive Hybrid: 65-80% equity, 20-35% debt
+   - Conservative Hybrid: 10-25% equity, 75-90% debt
+   - Equity Savings Fund: Equity + debt + arbitrage
+   - Multi Asset Allocation: Must invest in min 3 asset classes (min 10% each)
+
+4. INDEX FUNDS:
+   - Passively track a benchmark index (Nifty 50, Sensex, Nifty Next 50, etc.)
+   - Low expense ratio: 0.1% to 0.5%
+   - No fund manager risk — follows index composition exactly
+   - Best for beginners and long-term passive investors
+   - Popular: UTI Nifty 50, HDFC Index Nifty 50, SBI Nifty Index
+
+SIP (SYSTEMATIC INVESTMENT PLAN) RULES
+========================================
+- Minimum SIP: As low as ₹100/month (most funds allow ₹500)
+- SIP dates: Usually 1st, 5th, 10th, 15th, 20th, 25th, 28th of month
+- Rupee Cost Averaging: Buy more units when NAV is low, fewer when NAV is high
+- SIP Step-up: Increase SIP amount annually (10-15% increase recommended)
+- SIP returns are better than lump sum in volatile markets over long term
+- SIP through market crashes gives best long-term returns — NEVER STOP SIP during crashes
+- SIP in index fund: Historically 12-15% CAGR over 10+ years in Nifty 50
+
+DIRECT VS REGULAR PLANS
+=========================
+- Direct Plan: Bought directly from AMC website or apps (Groww, Zerodha Coin, Kuvera)
+  - No commission to distributor = Lower expense ratio = Higher returns
+  - Expense ratio typically 0.5-1.0% lower than regular plan
+  - Over 20 years, 1% lower expense = 15-20% more wealth
+  - Recommended for all investors who can self-research
+
+- Regular Plan: Bought through a mutual fund distributor/advisor
+  - Higher expense ratio (includes distributor commission)
+  - Suitable only if you need advisory services and cannot self-manage
+
+EXIT LOAD RULES
+================
+- Most equity funds: 1% if redeemed within 1 year
+- ELSS: No exit load (3-year mandatory lock-in)
+- Liquid funds: Graded exit load (0-7 days), nil after 7 days
+- Index funds: Usually 0.25% within 15 days, nil after
+- Debt funds: Varies, typically nil after 6 months to 1 year
+- Always check exit load before investing
+
+EXPENSE RATIO NORMS (SEBI 2024)
+=================================
+- Maximum allowed expense ratio depends on AUM size
+- For equity funds: 2.25% max for first ₹500 Cr, decreasing slabs
+- For debt funds: 2.0% max for first ₹500 Cr
+- Index funds/ETFs: Typically 0.1% to 0.5%
+- Lower expense ratio = more money stays invested = higher long-term returns
+- Rule: Always prefer funds with below-average expense ratio in their category
+
+FUND SELECTION CRITERIA
+========================
+1. Consistency: Check 1-year, 3-year, 5-year, 10-year returns vs category average
+2. Fund Manager: Track record matters — how did they perform during 2020 crash, 2022 correction?
+3. AUM Size: Very large AUM (>₹50,000 Cr) may struggle in mid/small cap categories
+4. Expense Ratio: Lower is better, especially for index funds
+5. Portfolio Overlap: Avoid multiple funds holding same stocks
+6. Risk Metrics: Check Sharpe Ratio (higher = better risk-adjusted returns), Standard Deviation
+7. Rolling Returns: More reliable than point-to-point returns
+8. Benchmark Comparison: Fund should consistently beat its benchmark index
+
+NFO (NEW FUND OFFER) WARNING
+===============================
+- NFO price is always ₹10 — this does NOT mean it's "cheap"
+- No track record to evaluate
+- Marketing-driven, often launched to capitalize on market themes
+- Recommendation: Avoid NFOs. Invest in funds with 5+ year proven track record
+
+SEBI MUTUAL FUND CATEGORIZATION NORMS (2017)
+==============================================
+- Each AMC can have only ONE fund per category (with few exceptions)
+- Standardized categories make comparison easier
+- Benchmark must be a Total Return Index (TRI) — includes dividends
+- Risk-o-meter: Mandatory risk label from Low to Very High on every fund

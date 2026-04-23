@@ -1,0 +1,101 @@
+TRADING RULES IN INDIA — INTRADAY, F&O, OPTIONS
+===================================================
+
+INTRADAY TRADING RULES
+========================
+What: Buy and sell same stock on same day. No delivery — position squared off by 3:15 PM.
+Margin: Brokers provide 5-20x leverage for intraday (MIS/BO/CO orders).
+Brokerage: Typically ₹20/order flat (Zerodha, Groww) or percentage-based.
+
+SEBI RULES FOR INTRADAY:
+- Peak margin reporting: Broker must collect upfront margin from client
+- Margin penalty: If client uses more margin than available, exchange levies penalty
+- Settlement: T+1 settlement for equities (same-day for intraday, no delivery)
+- Short selling allowed in intraday — sell first, buy later to cover
+
+INTRADAY TRADING STRATEGIES:
+1. Opening Range Breakout (ORB): Trade breakout of first 15-30 min range
+2. VWAP Strategy: Buy below VWAP (Volume Weighted Average Price), sell above
+3. Moving Average Crossover: 5 EMA crossing 20 EMA for entry
+4. Support/Resistance: Trade bounces off key S/R levels
+5. Gap Up/Down Strategy: Trade gap fills — stocks tend to fill gaps
+
+INTRADAY RISK MANAGEMENT:
+- Risk max 1-2% of capital per trade
+- Use strict stop-loss — NEVER trade without stop-loss
+- Risk:Reward ratio minimum 1:2 (risk ₹100 to make ₹200)
+- Avoid trading first 15 minutes (volatile opening)
+- Max 2-3 trades per day for beginners
+- SEBI data: 90% of intraday traders lose money — be warned
+
+INTRADAY TAXATION:
+- Profits taxed as business income (speculative) at slab rate
+- If you do intraday regularly, file ITR-3 (not ITR-1)
+- Intraday losses can ONLY offset intraday profits (speculative loss)
+- Cannot offset against delivery-based STCG/LTCG or salary income
+- STT paid: 0.025% on sell side only
+
+F&O (FUTURES AND OPTIONS) TRADING
+====================================
+
+FUTURES:
+- Agreement to buy/sell asset at predetermined price on future date
+- Lot size: Fixed by exchange (e.g., Nifty 50 lot = 25 units, BankNifty lot = 15 units)
+- Margin: SPAN + Exposure margin required (typically 10-15% of contract value)
+- Mark-to-Market (MTM): Daily profit/loss settlement
+- Expiry: Last Thursday of every month (weekly expiry every Thursday for index)
+- Rollover: Move position to next month expiry before current expiry
+
+OPTIONS:
+- Right (not obligation) to buy (Call) or sell (Put) at a specific price
+- Call Option (CE): Right to buy — bullish bet
+- Put Option (PE): Right to sell — bearish bet
+- Premium: Price paid to buy an option
+- Strike Price: The price at which option can be exercised
+- ITM (In The Money): Call strike < current price, Put strike > current price
+- ATM (At The Money): Strike price ≈ current price
+- OTM (Out of The Money): Call strike > current price, Put strike < current price
+
+OPTIONS GREEKS:
+- Delta: How much option price changes per ₹1 move in underlying (0 to 1 for calls, 0 to -1 for puts)
+- Gamma: Rate of change of delta — highest for ATM options
+- Theta: Time decay — how much value option loses per day. Option sellers benefit from theta.
+- Vega: Sensitivity to implied volatility changes
+- Rule: Option buyers need big moves to profit. Option sellers profit from time decay.
+
+POPULAR OPTIONS STRATEGIES:
+1. Long Call: Buy call when bullish. Max loss = premium paid.
+2. Long Put: Buy put when bearish. Max loss = premium paid.
+3. Covered Call: Own stock + sell OTM call. Income strategy.
+4. Protective Put: Own stock + buy put. Insurance strategy.
+5. Bull Call Spread: Buy ATM call + sell OTM call. Limited risk/reward.
+6. Bear Put Spread: Buy ATM put + sell OTM put. Bearish with limited risk.
+7. Iron Condor: Sell OTM call + sell OTM put + buy further OTM call + buy further OTM put. Range-bound strategy.
+8. Straddle: Buy ATM call + ATM put. Profit from big move in either direction.
+9. Strangle: Buy OTM call + OTM put. Cheaper than straddle, needs bigger move.
+
+F&O TAXATION (INDIA):
+- F&O profits: Non-speculative business income, taxed at slab rate
+- File ITR-3 (business income)
+- If F&O turnover > ₹10 Cr: Tax audit mandatory under Section 44AB
+- F&O turnover calculation: Sum of absolute values of profit + loss on all trades
+- If turnover < ₹2 Cr and profit > 6% of turnover: Can file under Section 44AD (presumptive)
+- F&O losses can offset any income except salary
+- Can carry forward F&O losses for 8 years
+- STT on options: 0.1% on sell side premium (increased in Budget 2024)
+- STT on futures: 0.0125% on sell side
+
+SEBI F&O RULES (2024-25):
+- Weekly expiry rationalization: Only one benchmark index per exchange for weekly expiry
+- Upfront premium collection: Option buyers must pay full premium upfront
+- Minimum contract size: Increased from ₹5L to ₹15L for new contracts
+- Position limits: Exchange-defined limits for individuals and institutions
+- SEBI Study: 9 out of 10 individual F&O traders incur losses
+- Average loss per trader: ₹1.2 lakh per year (including transaction costs)
+
+KEY OPTION CHAIN METRICS:
+- Put-Call Ratio (PCR): Total put OI / Total call OI. PCR > 1 = bullish, PCR < 1 = bearish
+- Max Pain: Strike price where maximum options expire worthless. Market tends to gravitate here.
+- Open Interest (OI): Number of outstanding contracts. High OI at strike = strong support/resistance
+- IV (Implied Volatility): Market's expectation of future volatility. High IV = expensive options.
+- IV Rank/Percentile: Where current IV stands relative to past 1-year range.

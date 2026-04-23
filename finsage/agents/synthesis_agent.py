@@ -13,6 +13,8 @@ def run(state: dict) -> dict:
     into one clear, formatted recommendation.
     """
     try:
+        intent = state.get("intent", "general")
+
         # Collect all available outputs
         context_parts = []
 
@@ -22,6 +24,19 @@ def run(state: dict) -> dict:
             summary = market_data.get("summary", "")
             if summary:
                 context_parts.append(f"**Market Data:**\n{summary}")
+
+        # Company profile
+        profile = state.get("company_profile")
+        if profile and isinstance(profile, dict) and "error" not in str(profile):
+            context_parts.append(
+                f"**Company Fundamentals:**\n"
+                f"- Name: {profile.get('name', 'N/A')} | Sector: {profile.get('sector', 'N/A')}\n"
+                f"- Market Cap: {profile.get('market_cap_formatted', 'N/A')}\n"
+                f"- P/E: {profile.get('pe_ratio', 'N/A')} | EPS: ₹{profile.get('eps', 'N/A')}\n"
+                f"- Dividend Yield: {profile.get('dividend_yield', 'N/A')}% | ROE: {profile.get('roe', 'N/A')}%\n"
+                f"- Debt/Equity: {profile.get('debt_to_equity', 'N/A')} | P/B: {profile.get('price_to_book', 'N/A')}\n"
+                f"- Profit Margin: {profile.get('profit_margin', 'N/A')}%"
+            )
 
         # Technical signals
         tech = state.get("technical_signals")
@@ -42,6 +57,28 @@ def run(state: dict) -> dict:
             mood = "positive" if sentiment > 0.2 else ("negative" if sentiment < -0.2 else "neutral")
             context_parts.append(f"**News Sentiment:** {sentiment} ({mood})")
 
+        # Trading analysis
+        trading = state.get("trading_analysis")
+        if trading:
+            context_parts.append(f"**Trading Analysis:**\n{trading[:1000]}")
+
+        # Options chain summary
+        options = state.get("options_chain")
+        if options and isinstance(options, dict) and "error" not in options:
+            context_parts.append(
+                f"**Options Data:** PCR={options.get('pcr', 'N/A')}, "
+                f"Max Pain=₹{options.get('max_pain', 'N/A')}, "
+                f"Call OI={options.get('total_call_oi', 'N/A')}, "
+                f"Put OI={options.get('total_put_oi', 'N/A')}"
+            )
+
+        # Mutual fund data
+        mf_data = state.get("mutual_fund_data")
+        if mf_data and isinstance(mf_data, dict):
+            mf_analysis = mf_data.get("analysis", "")
+            if mf_analysis:
+                context_parts.append(f"**Mutual Fund Analysis:**\n{mf_analysis[:1000]}")
+
         # Tax result
         tax_result = state.get("tax_result")
         if tax_result:
@@ -53,6 +90,11 @@ def run(state: dict) -> dict:
             plan = salary_plan.get("plan", "")
             if plan:
                 context_parts.append(f"**Salary Plan:**\n{plan[:800]}")
+
+        # General finance result
+        general = state.get("general_finance_result")
+        if general:
+            context_parts.append(f"**Financial Analysis:**\n{general[:1000]}")
 
         # Data freshness
         freshness = state.get("data_freshness", "N/A")
@@ -79,7 +121,82 @@ def run(state: dict) -> dict:
                 "Reduce confidence and add a strong risk warning."
             )
 
-        system_prompt = """You are a senior Indian financial advisor giving a final recommendation.
+        # Choose system prompt based on intent
+        if intent == "trading":
+            system_prompt = """You are a senior Indian trading expert giving a final analysis.
+Format your response using this EXACT structure:
+
+**Summary:** one sentence describing the trading opportunity
+
+**Signal:** BUY / SELL / HOLD / WAIT (pick one word)
+
+**Confidence:** number between 0 and 100 percent
+
+**Trade Setup:**
+- Entry: specific price
+- Target: specific price
+- Stop-Loss: specific price
+- Risk:Reward ratio
+
+**Key Analysis Points:**
+- point one
+- point two
+- point three
+
+**Risk Warnings:**
+- SEBI data: 9 out of 10 F&O traders lose money
+- Never risk more than 1-2% of capital per trade
+- This is educational content, not trading advice
+
+**Disclaimer:** This is AI-generated trading information for educational purposes only. Not SEBI-registered advice."""
+
+        elif intent == "mutual_fund":
+            system_prompt = """You are a senior Indian mutual fund advisor giving a final recommendation.
+Format your response using this EXACT structure:
+
+**Summary:** one sentence about the fund/strategy
+
+**Recommendation:** INVEST / WAIT / SWITCH / CONTINUE SIP (pick one)
+
+**Confidence:** number between 0 and 100 percent
+
+**Fund Assessment:**
+- point one
+- point two
+- point three
+
+**SIP Strategy:**
+- Recommended SIP amount and frequency
+- Expected timeline for goals
+
+**Action Plan:**
+specific steps the user should take now
+
+**Disclaimer:** This is AI-generated financial information for educational purposes only. Not SEBI-registered investment advice."""
+
+        elif intent in ("insurance", "loan", "retirement", "gold", "crypto"):
+            system_prompt = """You are a senior Indian financial advisor giving comprehensive guidance.
+Format your response using this EXACT structure:
+
+**Summary:** one sentence addressing the query
+
+**Recommendation:** clear action item
+
+**Confidence:** number between 0 and 100 percent
+
+**Detailed Analysis:**
+- key points with specific numbers and ₹ amounts
+
+**Action Plan:**
+specific steps the user should take
+
+**Important Notes:**
+- relevant warnings or tips
+
+**Disclaimer:** This is AI-generated financial information for educational purposes only. Consult a qualified professional."""
+
+        else:
+            system_prompt = """You are a senior Indian financial advisor giving a final recommendation.
 Format your response using this EXACT structure:
 
 **Summary:** one sentence describing the action
@@ -103,7 +220,7 @@ specific steps the user should take now
 **Disclaimer:** This is AI-generated financial information for educational purposes only. Not SEBI-registered investment advice. Consult a SEBI-registered financial advisor before making investment decisions. Past performance does not guarantee future returns."""
 
         user_prompt = f"""User's question: "{state['raw_query']}"
-Intent detected: {state.get('intent', 'general')}
+Intent detected: {intent}
 
 Here is all the data collected by our analysis agents:
 
@@ -123,7 +240,7 @@ Generate the final recommendation using the exact format specified. Be specific 
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.4,
-            max_tokens=2000,
+            max_tokens=2500,
         )
 
         recommendation = response.choices[0].message.content.strip()

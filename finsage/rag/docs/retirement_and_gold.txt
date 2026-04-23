@@ -1,0 +1,49 @@
+RETIREMENT PLANNING, GOLD, AND CRYPTO IN INDIA
+=================================================
+
+RETIREMENT PLANNING — THE 3.5% RULE FOR INDIA
+------------------------------------------------
+Need 28-30x your annual expenses as retirement corpus.
+Example: ₹1L/month expenses → need ₹3.4 Cr corpus at retirement.
+Start early: ₹10K/month SIP from age 25 at 12% = ₹3.5 Cr by 55.
+Same from age 35 = only ₹1.0 Cr. Power of compounding matters.
+
+NPS (NATIONAL PENSION SYSTEM) — LATEST RULES
+===============================================
+Tax Benefits:
+- Section 80CCD(1): Up to ₹1.5L within 80C limit
+- Section 80CCD(1B): Additional ₹50K over 80C limit
+- Section 80CCD(2): Employer contribution up to 14% (Central Govt) or 10%
+
+At Maturity (Age 60):
+- 60% lump sum: TAX-FREE (Budget 2024)
+- 40%: Must buy annuity (taxable as income)
+
+Partial Withdrawal: After 3 years, max 25% own contributions, for education/illness/home.
+Early Exit: After 5 years. 20% lump sum + 80% annuity.
+
+Asset Allocation: Equity (E) up to 75%, Corporate Bonds (C), Govt Securities (G), Alternative (A) up to 5%.
+
+SENIOR CITIZEN BENEFITS
+=========================
+- 80TTB: ₹50K deduction on interest income
+- Higher FD rates: +0.25-0.50%
+- SCSS: 8.2%, 5-year, max ₹30L, 80C eligible
+
+GOLD INVESTMENT OPTIONS
+=========================
+1. SGB (Sovereign Gold Bonds): BEST option. 2.5% annual interest + gold price. Tax-free LTCG at maturity. 8-year tenure, exit after 5th year. Min 1g, max 4kg/year.
+2. Gold ETF: Listed on exchange, 0.5-1% expense ratio. LTCG 12.5% above ₹1.25L.
+3. Digital Gold: Via apps, no regulation, capital gains apply.
+4. Physical Gold: NOT recommended — making charges 8-25%, storage issues.
+Gold should be max 5-10% of portfolio.
+
+CRYPTO TAXATION (EFFECTIVE APRIL 2022)
+=========================================
+- 30% flat tax on ALL gains (no short/long term distinction)
+- 1% TDS on transactions above ₹10K
+- No deductions except cost of acquisition
+- Crypto losses CANNOT offset any other income or other crypto gains
+- No indexation benefit
+- Mining/staking: Taxable at slab rate
+- Must report in ITR Schedule VDA

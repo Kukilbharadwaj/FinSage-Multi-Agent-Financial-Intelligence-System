@@ -59,16 +59,19 @@ st.markdown("#### 💡 Example Questions:")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.button("💰 Salary ₹50,000", use_container_width=True, on_click=set_query, args=("My salary is ₹50,000. How to manage it properly?",))
-    st.button("📉 What is STCG?", use_container_width=True, on_click=set_query, args=("What is the new STCG and LTCG tax rate after the July budget?",))
+    st.button("📊 Stock Analysis", use_container_width=True, on_click=set_query, args=("Should I buy Reliance stock today? How are its fundamentals?",))
+    st.button("💰 Salary & Budget", use_container_width=True, on_click=set_query, args=("My salary is ₹80,000. How to manage it properly?",))
+    st.button("📉 Tax Calculation", use_container_width=True, on_click=set_query, args=("I made 50k profit in TCS after 8 months. What is my tax?",))
 
 with col2:
-    st.button("📊 Buy Infosys?", use_container_width=True, on_click=set_query, args=("Should I buy Infosys stock today?",))
-    st.button("🛡️ Section 80C", use_container_width=True, on_click=set_query, args=("How can I save tax using Section 80C?",))
+    st.button("📈 Intraday & Options", use_container_width=True, on_click=set_query, args=("Nifty option chain max pain and PCR today?",))
+    st.button("🛡️ Term Insurance", use_container_width=True, on_click=set_query, args=("Should I buy a term plan or ULIP?",))
+    st.button("🏦 Home Loan EMI", use_container_width=True, on_click=set_query, args=("Home loan of 50 lakhs for 15 years, what is EMI and tax benefit?",))
 
 with col3:
-    st.button("📈 Option Trading", use_container_width=True, on_click=set_query, args=("In option trading, what should I do right now?",))
-    st.button("💸 ITC Dividend", use_container_width=True, on_click=set_query, args=("Is ITC a good stock for dividend income?",))
+    st.button("💼 Mutual Fund SIP", use_container_width=True, on_click=set_query, args=("Is Parag Parikh Flexi Cap a good fund for monthly SIP?",))
+    st.button("🥇 Gold Investment", use_container_width=True, on_click=set_query, args=("Should I buy physical gold or SGB for investment?",))
+    st.button("👴 Retirement (NPS)", use_container_width=True, on_click=set_query, args=("What are the tax benefits of NPS under 80CCD?",))
 
 st.divider()
 
