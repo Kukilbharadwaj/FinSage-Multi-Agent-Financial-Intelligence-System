@@ -21,25 +21,69 @@ Important: this project is for educational and informational use only. It is not
 ## High-Level Architecture
 
 ```mermaid
-graph TD
-        User[User] --> UI[Gradio UI]
-        UI --> API[FastAPI Backend]
-        API --> Graph[LangGraph Orchestrator]
+graph TB
 
-        Graph --> Intent[Intent Agent]
-        Graph --> Market[Market Agent]
-        Graph --> MF[Mutual Fund Agent]
-        Graph --> Tax[Tax Agent]
-        Graph --> Salary[Salary Agent]
-        Graph --> News[News Agent]
-        Graph --> Synthesis[Synthesis Agent]
+    %% USER FLOW
+    User[👤 User] --> UI[🖥️ Gradio UI]
+    UI --> API[⚡ FastAPI Backend]
+    API --> Orchestrator[🧠 LangGraph Orchestrator]
 
-        Graph --> RAG[RAG Knowledge Base]
-        Graph --> MCPClient[MCP Runtime Client]
-        MCPClient --> MCPServer[MCP Server]
-        MCPServer --> Tools[Finance Tools]
+    %% AGENTS
+    subgraph Agents
+        direction LR
+        Intent[🎯 Intent]
+        Market[📈 Market]
+        MF[📊 Mutual Fund]
+        Tax[🧾 Tax]
+        Salary[💰 Salary]
+        News[📰 News]
+        Synthesis[🧩 Synthesis]
+    end
 
-        API --> DB[(SQLite)]
+    Orchestrator --> Intent
+    Orchestrator --> Market
+    Orchestrator --> MF
+    Orchestrator --> Tax
+    Orchestrator --> Salary
+    Orchestrator --> News
+
+    %% FLOW TO SYNTHESIS
+    Market --> Synthesis
+    MF --> Synthesis
+    Tax --> Synthesis
+    Salary --> Synthesis
+    News --> Synthesis
+
+    Synthesis --> Response[✅ Final Recommendation]
+
+    %% RAG (LAW + KNOWLEDGE)
+    subgraph RAG_Knowledge
+        direction TB
+        Docs[📚 Financial Laws and Rules GST Income Tax Policies]
+        VectorDB[🧠 Vector Store]
+    end
+
+    Tax --> Docs
+    Salary --> Docs
+    Docs --> VectorDB
+
+    %% MCP (REAL-TIME DATA)
+    subgraph MCP_Tools
+        direction TB
+        MCPClient[🔌 MCP Client]
+        MCPServer[🧠 MCP Server]
+        Tools[🛠️ Market APIs and Data]
+    end
+
+    Market --> MCPClient
+    MF --> MCPClient
+    News --> MCPClient
+
+    MCPClient --> MCPServer
+    MCPServer --> Tools
+
+    %% STORAGE
+    API --> DB[(🗄️ SQLite)]
 ```
 
 ## Tech Stack
@@ -99,10 +143,6 @@ Primary chat endpoint:
 }
 ```
 
-Other endpoints:
-
-- GET /api/health
-- GET /api/history/{user_id}
 
 ## Local Setup
 
@@ -140,8 +180,6 @@ Create .env in the project root:
 
 ```env
 GROQ_API_KEY=gsk_your_key_here
-MCP_ENABLED=true
-MCP_SERVER_URL=http://127.0.0.1:7861/sse
 ```
 
 ### 5. Build RAG index (first run only)
