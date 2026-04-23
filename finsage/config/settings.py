@@ -9,7 +9,10 @@ from pydantic import Field
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    GROQ_API_KEY: str = Field(..., description="Groq API key from https://console.groq.com")
+    GROQ_API_KEY: str = Field(
+        default="",
+        description="Groq API key from https://console.groq.com",
+    )
     MCP_ENABLED: bool = Field(
         default=True,
         description="Enable MCP tool calls from agent pipeline when available.",

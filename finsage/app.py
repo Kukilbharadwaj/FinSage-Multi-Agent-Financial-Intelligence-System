@@ -119,6 +119,12 @@ def build_app():
     # Ensure frontend talks to local FastAPI backend started below.
     os.environ.setdefault("FINSAGE_API_URL", f"http://{backend_host}:{backend_port}")
 
+    if not os.getenv("GROQ_API_KEY", "").strip():
+        print(
+            "[WARN] GROQ_API_KEY is not set. App can start, but AI responses will fail until you add the secret "
+            "in Hugging Face Space Settings > Variables and secrets."
+        )
+
     _start_mcp_background()
     startup_timeout = int(os.getenv("MCP_STARTUP_TIMEOUT", "15"))
     wait_for_mcp(os.environ["MCP_SERVER_URL"], timeout=startup_timeout)
