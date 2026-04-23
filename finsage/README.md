@@ -4,7 +4,7 @@
 
 Additionally, FinSage now exposes its core tools via the **Model Context Protocol (MCP)**, allowing external agents and tools (like Claude Desktop) to connect securely and utilize FinSage's robust financial scraping and analysis tools.
 
-Important integration detail: the FastAPI backend (`main.py`) now acts as the MCP client runtime. This means your backend automatically connects to `mcp_server.py` (if available) and uses MCP tools directly during normal Streamlit requests.
+Important integration detail: the FastAPI backend (`main.py`) now acts as the MCP client runtime. This means your backend automatically connects to `mcp_server.py` (if available) and uses MCP tools directly during normal Gradio requests.
 
 > ⚠️ **Disclaimer:** This is an educational project. Not SEBI-registered investment advice. Always consult a qualified financial advisor before making investment decisions.
 
@@ -32,7 +32,7 @@ FinSage utilizes a multi-agent orchestration framework (LangGraph) backed by mul
 
 ```mermaid
 graph TD
-    User([User Query]) --> API[FastAPI Backend / Streamlit UI]
+    User([User Query]) --> API[FastAPI Backend / Gradio UI]
     API --> Intent[Intent Classification Agent]
     
     Intent -->|Stock/Index| Market[Market Agent]
@@ -114,7 +114,7 @@ finsage/
 ├── api/                          ← FastAPI Endpoints
 │   └── routes.py                 
 │
-├── frontend/                     ← Streamlit UI
+├── frontend/                     ← Gradio UI
 │   └── app.py                    
 │
 └── scripts/
@@ -148,7 +148,7 @@ source venv/bin/activate
 ```
 
 ### Step 3: Install Dependencies
-Install all required packages (including FastAPI, Streamlit, LangGraph, and MCP):
+Install all required packages (including FastAPI, Gradio, LangGraph, and MCP):
 ```bash
 pip install -r requirements.txt
 ```
@@ -175,14 +175,14 @@ python main.py
 ```
 *The server will run on `http://localhost:8000`. You can view the API docs at `http://localhost:8000/docs`.*
 
-### Step 7: Start the Streamlit Frontend
+### Step 7: Start the Gradio Frontend
 Open a **new terminal**, activate the virtual environment, and run the frontend:
 ```bash
 cd finsage
 venv\Scripts\Activate.ps1
-streamlit run frontend/app.py
+python frontend/app.py
 ```
-*Your browser will open automatically to `http://localhost:8501` where you can chat with FinSage.*
+*Your browser will open automatically to `http://localhost:7860` where you can chat with FinSage.*
 
 ---
 
@@ -243,7 +243,7 @@ python main.py
 ```powershell
 cd "e:\AI_Agent\finance agent\finsage"
 venv\Scripts\Activate.ps1
-streamlit run frontend/app.py
+python frontend/app.py
 ```
 
 3. Terminal 3 (MCP server, optional but recommended for MCP-integrated tool path)
@@ -253,7 +253,7 @@ venv\Scripts\Activate.ps1
 python mcp_server.py
 ```
 
-`mcp_client.py` is optional test tooling only and is not required for Streamlit + backend operation.
+`mcp_client.py` is optional test tooling only and is not required for Gradio + backend operation.
 
 ### Verify MCP Connection
 Check backend health endpoint after starting all services:
@@ -266,4 +266,4 @@ Expected fields in response:
 - `mcp_tools: [...]`
 
 ---
-*Built with ❤️ using Groq, LangGraph, FastAPI, MCP, and Streamlit*
+*Built with ❤️ using Groq, LangGraph, FastAPI, MCP, and Gradio*

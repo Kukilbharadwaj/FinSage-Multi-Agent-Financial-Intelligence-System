@@ -1,196 +1,312 @@
-# frontend/app.py
-# Streamlit chat UI for FinSage AI.
+"""Gradio chat UI for FinSage AI."""
 
-import streamlit as st
-import httpx
+import os
 import time
 import uuid
-import os
+from typing import Any
+
+import gradio as gr
+import httpx
+
 
 API_BASE_URL = os.getenv("FINSAGE_API_URL", "http://localhost:8000")
+MAX_QUERIES = 5
 
-# ─── Page Config ───
-st.set_page_config(
-    page_title="FinSage AI",
-    page_icon="📈",
-    layout="centered",
-)
+EXAMPLE_QUERIES = [
+    ("📊 Stock Analysis", "Should I buy Reliance stock today? How are its fundamentals?"),
+    ("💰 Salary & Budget", "My salary is ₹80,000. How to manage it properly?"),
+    ("📉 Tax Calculation", "I made 50k profit in TCS after 8 months. What is my tax?"),
+    ("📈 Intraday & Options", "Nifty option chain max pain and PCR today?"),
+    ("🛡️ Term Insurance", "Should I buy a term plan or ULIP?"),
+    ("🏦 Home Loan EMI", "Home loan of 50 lakhs for 15 years, what is EMI and tax benefit?"),
+    ("💼 Mutual Fund SIP", "Is Parag Parikh Flexi Cap a good fund for monthly SIP?"),
+    ("🥇 Gold Investment", "Should I buy physical gold or SGB for investment?"),
+    ("👴 Retirement (NPS)", "What are the tax benefits of NPS under 80CCD?"),
+]
 
-# ─── Custom CSS ───
-st.markdown("""
-<style>
-    .main-header {
-        text-align: center;
-        padding: 1rem 0;
+
+def init_state() -> dict[str, Any]:
+    return {
+        "history": [],
+        "query_count": 0,
+        "user_id": f"gradio_{uuid.uuid4().hex[:12]}",
     }
-    .subtitle {
-        text-align: center;
-        color: #888;
-        font-size: 0.9rem;
-        margin-bottom: 2rem;
+
+
+def ensure_state(state: dict[str, Any] | None) -> dict[str, Any]:
+    if not state:
+        return init_state()
+
+    state.setdefault("history", [])
+    state.setdefault("query_count", 0)
+    state.setdefault("user_id", f"gradio_{uuid.uuid4().hex[:12]}")
+    return state
+
+
+def intent_badge(intent: str) -> str:
+    intent_colors = {
+        "stock": "🟢",
+        "index": "🔵",
+        "tax": "🟠",
+        "salary": "🟣",
+        "general": "⚪",
     }
-    .stProgress > div > div > div > div {
-        background-color: #00d4aa;
-    }
-    .trace-step {
-        padding: 4px 0;
-        font-family: monospace;
-        font-size: 0.85rem;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ─── Header ───
-st.markdown('<div class="main-header">', unsafe_allow_html=True)
-st.title("📈 FinSage AI — Indian Financial Assistant")
-st.markdown('</div>', unsafe_allow_html=True)
-st.markdown(
-    '<p class="subtitle">Powered by Groq + LangGraph | Free real-time market data | Educational use only</p>',
-    unsafe_allow_html=True,
-)
-
-# ─── Session State Init ───
-if "history" not in st.session_state:
-    st.session_state.history = []
-if "query_count" not in st.session_state:
-    st.session_state.query_count = 0
-if "user_id" not in st.session_state:
-    st.session_state.user_id = f"streamlit_{uuid.uuid4().hex[:12]}"
-
-def set_query(query_text):
-    st.session_state.query_input = query_text
+    return f"**Intent:** {intent_colors.get(intent, '⚪')} {intent}"
 
 
-limit_reached = st.session_state.query_count >= 5
-remaining_queries = max(0, 5 - st.session_state.query_count)
+def confidence_bar(confidence: int) -> str:
+    bounded_confidence = max(0, min(100, int(confidence)))
+    return (
+        "<div style='margin-top:8px;'>"
+        f"<div><b>Confidence Score:</b> {bounded_confidence}%</div>"
+        "<div style='width:100%;height:12px;background:#e5e7eb;border-radius:999px;overflow:hidden;'>"
+        f"<div style='width:{bounded_confidence}%;height:100%;background:#00d4aa;'></div>"
+        "</div>"
+        "</div>"
+    )
 
-# ─── Example Questions Buttons ───
-st.markdown("#### 💡 Example Questions:")
-col1, col2, col3 = st.columns(3)
 
-with col1:
-    st.button("📊 Stock Analysis", use_container_width=True, on_click=set_query, args=("Should I buy Reliance stock today? How are its fundamentals?",), disabled=limit_reached)
-    st.button("💰 Salary & Budget", use_container_width=True, on_click=set_query, args=("My salary is ₹80,000. How to manage it properly?",), disabled=limit_reached)
-    st.button("📉 Tax Calculation", use_container_width=True, on_click=set_query, args=("I made 50k profit in TCS after 8 months. What is my tax?",), disabled=limit_reached)
+def trace_block(trace: list[Any], elapsed: float) -> str:
+    lines = ["<details><summary><b>🔍 See how this was analyzed</b></summary><ul>"]
+    for step in trace:
+        lines.append(f"<li><code>{str(step)}</code></li>")
+    lines.append(f"<li>⏱️ Total time: {elapsed}s</li>")
+    lines.append("</ul></details>")
+    return "".join(lines)
 
-with col2:
-    st.button("📈 Intraday & Options", use_container_width=True, on_click=set_query, args=("Nifty option chain max pain and PCR today?",), disabled=limit_reached)
-    st.button("🛡️ Term Insurance", use_container_width=True, on_click=set_query, args=("Should I buy a term plan or ULIP?",), disabled=limit_reached)
-    st.button("🏦 Home Loan EMI", use_container_width=True, on_click=set_query, args=("Home loan of 50 lakhs for 15 years, what is EMI and tax benefit?",), disabled=limit_reached)
 
-with col3:
-    st.button("💼 Mutual Fund SIP", use_container_width=True, on_click=set_query, args=("Is Parag Parikh Flexi Cap a good fund for monthly SIP?",), disabled=limit_reached)
-    st.button("🥇 Gold Investment", use_container_width=True, on_click=set_query, args=("Should I buy physical gold or SGB for investment?",), disabled=limit_reached)
-    st.button("👴 Retirement (NPS)", use_container_width=True, on_click=set_query, args=("What are the tax benefits of NPS under 80CCD?",), disabled=limit_reached)
+def history_block(history: list[dict[str, Any]]) -> str:
+    if not history:
+        return ""
 
-st.divider()
+    blocks = ["#### 📜 Recent Queries"]
+    for index, item in enumerate(history):
+        icon = "🕛" if index == 0 else "🕐"
+        short_query = f"{item['query'][:80]}..." if len(item["query"]) > 80 else item["query"]
+        short_answer = item["answer"][:500] + ("..." if len(item["answer"]) > 500 else "")
+        blocks.append(
+            "<details {open_flag}><summary>{icon} {query}</summary>"
+            "<div style='margin:8px 0 0 0;'>{answer}</div>"
+            "<div style='font-size:0.9rem;color:#6b7280;'>Intent: {intent} | Confidence: {confidence}% | Time: {time}s</div>"
+            "</details>".format(
+                open_flag="open" if index == 0 else "",
+                icon=icon,
+                query=short_query,
+                answer=short_answer,
+                intent=item["intent"],
+                confidence=item["confidence"],
+                time=item["time"],
+            )
+        )
+    return "\n".join(blocks)
 
-# ─── Input Area ───
-st.caption(f"Session query limit: {st.session_state.query_count}/5 used ({remaining_queries} left)")
 
-if limit_reached:
-    st.error("🛑 You have reached the maximum limit of 5 queries per session. Please refresh the page to start a new session.")
+def status_text(query_count: int) -> str:
+    remaining = max(0, MAX_QUERIES - query_count)
+    if query_count >= MAX_QUERIES:
+        return (
+            f"Session query limit: {query_count}/{MAX_QUERIES} used ({remaining} left)\n\n"
+            "🛑 You have reached the maximum limit of 5 queries per session. Refresh the page to start a new session."
+        )
+    return f"Session query limit: {query_count}/{MAX_QUERIES} used ({remaining} left)"
 
-query = st.text_input(
-    "Ask any financial question...",
-    placeholder="e.g., I sold TCS after 8 months with ₹50,000 profit. What is my tax?",
-    key="query_input",
-    disabled=limit_reached
-)
 
-# ─── Submit Button ───
-if st.button("🔍 Analyze", type="primary", use_container_width=True, disabled=limit_reached):
+def analyze(query: str, state: dict[str, Any] | None):
+    state = ensure_state(state)
+
+    if state["query_count"] >= MAX_QUERIES:
+        return (
+            "",
+            confidence_bar(0),
+            "",
+            "",
+            history_block(state["history"]),
+            status_text(state["query_count"]),
+            "",
+            state,
+        )
+
     if not query or not query.strip():
-        st.warning("Please enter a question first.")
-    else:
-        with st.spinner("🔄 Fetching market data and analyzing... This may take 30-60 seconds."):
-            try:
-                start_time = time.time()
+        return (
+            "⚠️ Please enter a question first.",
+            confidence_bar(0),
+            "",
+            "",
+            history_block(state["history"]),
+            status_text(state["query_count"]),
+            query,
+            state,
+        )
 
-                response = httpx.post(
-                    f"{API_BASE_URL}/api/chat",
-                    json={"user_id": st.session_state.user_id, "query": query.strip()},
-                    timeout=120.0,
-                )
+    try:
+        start_time = time.time()
+        response = httpx.post(
+            f"{API_BASE_URL}/api/chat",
+            json={"user_id": state["user_id"], "query": query.strip()},
+            timeout=120.0,
+        )
+        elapsed = round(time.time() - start_time, 1)
 
-                elapsed = round(time.time() - start_time, 1)
+        if response.status_code == 200:
+            data = response.json()
+            item = {
+                "query": query,
+                "answer": data.get("answer", "No answer generated."),
+                "confidence": data.get("confidence", 0) or 0,
+                "intent": data.get("intent", "general"),
+                "trace": data.get("trace", []),
+                "time": elapsed,
+            }
+            state["history"].insert(0, item)
+            state["history"] = state["history"][:5]
+            state["query_count"] += 1
 
-                if response.status_code == 200:
-                    data = response.json()
+            answer = f"✅ Analysis complete in {elapsed}s\n\n{item['answer']}"
+            confidence = confidence_bar(item["confidence"])
+            intent = intent_badge(item["intent"])
+            trace = trace_block(item["trace"], elapsed)
+            history = history_block(state["history"])
+            status = status_text(state["query_count"])
+            return answer, confidence, intent, trace, history, status, "", state
 
-                    # Save to session history
-                    st.session_state.history.insert(0, {
-                        "query": query,
-                        "answer": data["answer"],
-                        "confidence": data["confidence"],
-                        "intent": data["intent"],
-                        "trace": data["trace"],
-                        "time": elapsed,
-                    })
-                    # Keep only last 5
-                    st.session_state.history = st.session_state.history[:5]
-                    
-                    st.session_state.query_count += 1
+        if response.status_code == 400:
+            detail = response.json().get("detail", "Unknown error")
+            return (
+                f"❌ Bad request: {detail}",
+                confidence_bar(0),
+                "",
+                "",
+                history_block(state["history"]),
+                status_text(state["query_count"]),
+                query,
+                state,
+            )
 
-                    # ─── Display Results ───
-                    st.success(f"✅ Analysis complete in {elapsed}s")
+        return (
+            f"❌ Server error ({response.status_code}): {response.text[:300]}",
+            confidence_bar(0),
+            "",
+            "",
+            history_block(state["history"]),
+            status_text(state["query_count"]),
+            query,
+            state,
+        )
 
-                    # Answer
-                    st.markdown("---")
-                    st.markdown(data["answer"])
+    except httpx.ConnectError:
+        return (
+            "❌ Backend not running. Start it with: cd finsage ; python main.py",
+            confidence_bar(0),
+            "",
+            "",
+            history_block(state["history"]),
+            status_text(state["query_count"]),
+            query,
+            state,
+        )
+    except httpx.ReadTimeout:
+        return (
+            "⏰ Request timed out (over 120 seconds). The backend might be overloaded. Try again.",
+            confidence_bar(0),
+            "",
+            "",
+            history_block(state["history"]),
+            status_text(state["query_count"]),
+            query,
+            state,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        return (
+            f"❌ Unexpected error: {str(exc)[:300]}",
+            confidence_bar(0),
+            "",
+            "",
+            history_block(state["history"]),
+            status_text(state["query_count"]),
+            query,
+            state,
+        )
 
-                    # Confidence bar
-                    st.markdown("---")
-                    confidence = data.get("confidence", 0) or 0
-                    st.markdown(f"**Confidence Score:** {confidence}%")
-                    st.progress(confidence / 100)
 
-                    # Intent badge
-                    intent = data.get("intent", "general")
-                    intent_colors = {
-                        "stock": "🟢", "index": "🔵", "tax": "🟠",
-                        "salary": "🟣", "general": "⚪",
-                    }
-                    st.markdown(f"**Intent:** {intent_colors.get(intent, '⚪')} `{intent}`")
+CUSTOM_CSS = """
+.main-title {
+    text-align: center;
+    margin-bottom: 0.2rem;
+}
+.subtitle {
+    text-align: center;
+    color: #6b7280;
+    font-size: 0.95rem;
+    margin-top: 0;
+    margin-bottom: 1rem;
+}
+"""
 
-                    # Agent trace
-                    with st.expander("🔍 See how this was analyzed"):
-                        for step in data.get("trace", []):
-                            st.markdown(f"- `{step}`")
-                        st.markdown(f"- ⏱️ Total time: {elapsed}s")
 
-                elif response.status_code == 400:
-                    st.error(f"❌ Bad request: {response.json().get('detail', 'Unknown error')}")
-                else:
-                    st.error(f"❌ Server error ({response.status_code}): {response.text[:300]}")
+def create_ui() -> gr.Blocks:
+    with gr.Blocks(title="FinSage AI", css=CUSTOM_CSS) as demo:
+        state = gr.State(init_state())
 
-            except httpx.ConnectError:
-                st.error(
-                    "❌ **Backend not running.** Start it with:\n\n"
-                    "```bash\ncd finsage\npython main.py\n```"
-                )
-            except httpx.ReadTimeout:
-                st.error(
-                    "⏰ **Request timed out** (over 120 seconds). "
-                    "The backend might be overloaded. Try again."
-                )
-            except Exception as e:
-                st.error(f"❌ Unexpected error: {str(e)[:300]}")
+        gr.Markdown("## 📈 FinSage AI — Indian Financial Assistant", elem_classes=["main-title"])
+        gr.Markdown(
+            "Powered by Groq + LangGraph | Free real-time market data | Educational use only",
+            elem_classes=["subtitle"],
+        )
 
-# ─── Session History ───
-if st.session_state.history:
-    st.divider()
-    st.markdown("#### 📜 Recent Queries")
+        gr.Markdown("#### 💡 Example Questions")
+        with gr.Row():
+            with gr.Column():
+                q1 = gr.Button(EXAMPLE_QUERIES[0][0], variant="secondary")
+                q2 = gr.Button(EXAMPLE_QUERIES[1][0], variant="secondary")
+                q3 = gr.Button(EXAMPLE_QUERIES[2][0], variant="secondary")
+            with gr.Column():
+                q4 = gr.Button(EXAMPLE_QUERIES[3][0], variant="secondary")
+                q5 = gr.Button(EXAMPLE_QUERIES[4][0], variant="secondary")
+                q6 = gr.Button(EXAMPLE_QUERIES[5][0], variant="secondary")
+            with gr.Column():
+                q7 = gr.Button(EXAMPLE_QUERIES[6][0], variant="secondary")
+                q8 = gr.Button(EXAMPLE_QUERIES[7][0], variant="secondary")
+                q9 = gr.Button(EXAMPLE_QUERIES[8][0], variant="secondary")
 
-    for i, item in enumerate(st.session_state.history):
-        with st.expander(f"{'🕐' if i > 0 else '🕛'} {item['query'][:80]}...", expanded=(i == 0)):
-            st.markdown(item["answer"][:500] + ("..." if len(item["answer"]) > 500 else ""))
-            st.caption(f"Intent: {item['intent']} | Confidence: {item['confidence']}% | Time: {item['time']}s")
+        status = gr.Markdown(status_text(0))
+        query_input = gr.Textbox(
+            label="Ask any financial question...",
+            placeholder="e.g., I sold TCS after 8 months with ₹50,000 profit. What is my tax?",
+            lines=2,
+        )
+        analyze_btn = gr.Button("🔍 Analyze", variant="primary")
 
-# ─── Footer ───
-st.divider()
-st.caption(
-    "⚠️ **Disclaimer:** FinSage AI provides financial information for educational purposes only. "
-    "This is not SEBI-registered investment advice. Always consult a qualified financial advisor "
-    "before making investment decisions."
-)
+        answer = gr.Markdown()
+        confidence = gr.HTML(confidence_bar(0))
+        intent = gr.Markdown()
+        trace = gr.HTML()
+        history = gr.Markdown()
+
+        examples = [q1, q2, q3, q4, q5, q6, q7, q8, q9]
+        for button, (_, query_text) in zip(examples, EXAMPLE_QUERIES):
+            button.click(
+                fn=lambda text=query_text: text,
+                inputs=None,
+                outputs=query_input,
+                api_name=False,
+                queue=False,
+            )
+
+        outputs = [answer, confidence, intent, trace, history, status, query_input, state]
+        analyze_btn.click(fn=analyze, inputs=[query_input, state], outputs=outputs)
+        query_input.submit(fn=analyze, inputs=[query_input, state], outputs=outputs)
+
+        gr.Markdown(
+            "⚠️ Disclaimer: FinSage AI provides financial information for educational purposes only. "
+            "This is not SEBI-registered investment advice. Always consult a qualified financial advisor "
+            "before making investment decisions."
+        )
+
+    return demo
+
+
+demo = create_ui()
+
+
+if __name__ == "__main__":
+    demo.launch(server_name="0.0.0.0", server_port=int(os.getenv("FINSAGE_UI_PORT", "7860")))

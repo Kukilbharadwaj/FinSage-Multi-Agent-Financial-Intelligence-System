@@ -6,29 +6,19 @@ import requests
 import uvicorn
 
 from mcp_server import mcp
-from main import app as fastapi_app
 
 
 # Hugging Face Spaces runs a single entry file (app.py).
-# Start MCP + FastAPI in background, then load Streamlit UI in this file.
+# Start the local MCP SSE server in a background daemon thread,
+# then launch the Gradio app in the main thread.
 _MCP_STARTED = threading.Event()
-_API_STARTED = threading.Event()
 _MCP_PROCESS: multiprocessing.Process | None = None
-
-
-def _is_service_up(url: str, timeout: int = 2) -> bool:
-    try:
-        response = requests.get(url, timeout=timeout, stream=True)
-        ok = response.status_code < 500
-        response.close()
-        return ok
-    except requests.RequestException:
-        return False
+_BACKEND_STARTED = threading.Event()
 
 
 def _run_mcp_server() -> None:
     mcp.settings.host = os.getenv("MCP_HOST", "0.0.0.0")
-    mcp.settings.port = int(os.getenv("MCP_PORT", "8001"))
+    mcp.settings.port = int(os.getenv("MCP_PORT", "7861"))
 
     transport = os.getenv("MCP_TRANSPORT", "sse").strip().lower()
     if transport == "http":
@@ -36,6 +26,15 @@ def _run_mcp_server() -> None:
         return
 
     mcp.run(transport="sse")
+
+
+def _run_backend_server() -> None:
+    backend_host = os.getenv("BACKEND_HOST", "127.0.0.1")
+    backend_port = int(os.getenv("BACKEND_PORT", "8000"))
+    # Use import string so startup events in main.py run normally.
+    config = uvicorn.Config("main:app", host=backend_host, port=backend_port, reload=False, log_level="info")
+    server = uvicorn.Server(config)
+    server.run()
 
 
 def _start_mcp_background() -> None:
@@ -61,6 +60,14 @@ def _start_mcp_background() -> None:
     _MCP_STARTED.set()
 
 
+def _start_backend_background() -> None:
+    if _BACKEND_STARTED.is_set():
+        return
+
+    threading.Thread(target=_run_backend_server, daemon=True, name="finsage-backend").start()
+    _BACKEND_STARTED.set()
+
+
 def wait_for_mcp(url: str, timeout: int = 15) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -77,41 +84,26 @@ def wait_for_mcp(url: str, timeout: int = 15) -> None:
     raise RuntimeError(f"MCP failed to start at {url} within {timeout}s")
 
 
-def _run_api_server() -> None:
-    api_host = os.getenv("API_HOST", "127.0.0.1")
-    api_port = int(os.getenv("API_PORT", "8000"))
-    uvicorn.run(
-        fastapi_app,
-        host=api_host,
-        port=api_port,
-        reload=False,
-        log_level="info",
-    )
-
-
-def _start_api_background() -> None:
-    if _API_STARTED.is_set():
-        return
-    threading.Thread(target=_run_api_server, daemon=True, name="finsage-fastapi").start()
-    _API_STARTED.set()
-
-
-def wait_for_api(url: str, timeout: int = 20) -> None:
+def wait_for_backend(url: str, timeout: int = 25) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             response = requests.get(url, timeout=2)
             if response.status_code < 500:
+                response.close()
                 return
+            response.close()
         except requests.RequestException:
             pass
         time.sleep(0.5)
 
-    raise RuntimeError(f"API failed to start at {url} within {timeout}s")
+    raise RuntimeError(f"Backend failed to start at {url} within {timeout}s")
 
 
 def build_app():
-    mcp_port = os.getenv("MCP_PORT", "8001")
+    backend_host = os.getenv("BACKEND_HOST", "127.0.0.1")
+    backend_port = os.getenv("BACKEND_PORT", "8000")
+    mcp_port = os.getenv("MCP_PORT", "7861")
     transport = os.getenv("MCP_TRANSPORT", "sse").strip().lower()
 
     default_url = f"http://127.0.0.1:{mcp_port}/mcp" if transport == "http" else f"http://127.0.0.1:{mcp_port}/sse"
@@ -124,24 +116,32 @@ def build_app():
             "Use MCP_TRANSPORT=sse or update mcp_client.py for Streamable HTTP client support."
         )
 
+    # Ensure frontend talks to local FastAPI backend started below.
+    os.environ.setdefault("FINSAGE_API_URL", f"http://{backend_host}:{backend_port}")
+
+    _start_mcp_background()
     startup_timeout = int(os.getenv("MCP_STARTUP_TIMEOUT", "15"))
-    if not _is_service_up(os.environ["MCP_SERVER_URL"]):
-        _start_mcp_background()
     wait_for_mcp(os.environ["MCP_SERVER_URL"], timeout=startup_timeout)
 
-    # Start FastAPI backend (main.py) after MCP is ready.
-    api_port = int(os.getenv("API_PORT", "8000"))
-    api_url = f"http://127.0.0.1:{api_port}"
-    os.environ.setdefault("FINSAGE_API_URL", api_url)
-    if not _is_service_up(f"{api_url}/api/health"):
-        _start_api_background()
-    wait_for_api(f"{api_url}/api/health", timeout=int(os.getenv("API_STARTUP_TIMEOUT", "20")))
+    _start_backend_background()
+    backend_health_url = f"http://{backend_host}:{backend_port}/api/health"
+    backend_timeout = int(os.getenv("BACKEND_STARTUP_TIMEOUT", "25"))
+    wait_for_backend(backend_health_url, timeout=backend_timeout)
 
-    # Import Streamlit UI only after backend is ready.
-    import frontend.app  # noqa: F401
+    # Import after env/setup so mcp_client picks the correct MCP_SERVER_URL.
+    from frontend.app import create_ui
 
-    return True
+    return create_ui()
 
 
-# Streamlit executes this file directly; build services then render UI.
-build_app()
+# Exported for Spaces runtime discovery.
+demo = build_app()
+
+
+
+demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.getenv("PORT", "7860")),
+        share=False,
+        show_error=True,
+    )
