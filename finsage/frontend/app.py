@@ -4,6 +4,7 @@
 import streamlit as st
 import httpx
 import time
+import uuid
 
 # ─── Page Config ───
 st.set_page_config(
@@ -50,33 +51,39 @@ if "history" not in st.session_state:
     st.session_state.history = []
 if "query_count" not in st.session_state:
     st.session_state.query_count = 0
+if "user_id" not in st.session_state:
+    st.session_state.user_id = f"streamlit_{uuid.uuid4().hex[:12]}"
 
 def set_query(query_text):
     st.session_state.query_input = query_text
+
+
+limit_reached = st.session_state.query_count >= 5
+remaining_queries = max(0, 5 - st.session_state.query_count)
 
 # ─── Example Questions Buttons ───
 st.markdown("#### 💡 Example Questions:")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.button("📊 Stock Analysis", use_container_width=True, on_click=set_query, args=("Should I buy Reliance stock today? How are its fundamentals?",))
-    st.button("💰 Salary & Budget", use_container_width=True, on_click=set_query, args=("My salary is ₹80,000. How to manage it properly?",))
-    st.button("📉 Tax Calculation", use_container_width=True, on_click=set_query, args=("I made 50k profit in TCS after 8 months. What is my tax?",))
+    st.button("📊 Stock Analysis", use_container_width=True, on_click=set_query, args=("Should I buy Reliance stock today? How are its fundamentals?",), disabled=limit_reached)
+    st.button("💰 Salary & Budget", use_container_width=True, on_click=set_query, args=("My salary is ₹80,000. How to manage it properly?",), disabled=limit_reached)
+    st.button("📉 Tax Calculation", use_container_width=True, on_click=set_query, args=("I made 50k profit in TCS after 8 months. What is my tax?",), disabled=limit_reached)
 
 with col2:
-    st.button("📈 Intraday & Options", use_container_width=True, on_click=set_query, args=("Nifty option chain max pain and PCR today?",))
-    st.button("🛡️ Term Insurance", use_container_width=True, on_click=set_query, args=("Should I buy a term plan or ULIP?",))
-    st.button("🏦 Home Loan EMI", use_container_width=True, on_click=set_query, args=("Home loan of 50 lakhs for 15 years, what is EMI and tax benefit?",))
+    st.button("📈 Intraday & Options", use_container_width=True, on_click=set_query, args=("Nifty option chain max pain and PCR today?",), disabled=limit_reached)
+    st.button("🛡️ Term Insurance", use_container_width=True, on_click=set_query, args=("Should I buy a term plan or ULIP?",), disabled=limit_reached)
+    st.button("🏦 Home Loan EMI", use_container_width=True, on_click=set_query, args=("Home loan of 50 lakhs for 15 years, what is EMI and tax benefit?",), disabled=limit_reached)
 
 with col3:
-    st.button("💼 Mutual Fund SIP", use_container_width=True, on_click=set_query, args=("Is Parag Parikh Flexi Cap a good fund for monthly SIP?",))
-    st.button("🥇 Gold Investment", use_container_width=True, on_click=set_query, args=("Should I buy physical gold or SGB for investment?",))
-    st.button("👴 Retirement (NPS)", use_container_width=True, on_click=set_query, args=("What are the tax benefits of NPS under 80CCD?",))
+    st.button("💼 Mutual Fund SIP", use_container_width=True, on_click=set_query, args=("Is Parag Parikh Flexi Cap a good fund for monthly SIP?",), disabled=limit_reached)
+    st.button("🥇 Gold Investment", use_container_width=True, on_click=set_query, args=("Should I buy physical gold or SGB for investment?",), disabled=limit_reached)
+    st.button("👴 Retirement (NPS)", use_container_width=True, on_click=set_query, args=("What are the tax benefits of NPS under 80CCD?",), disabled=limit_reached)
 
 st.divider()
 
 # ─── Input Area ───
-limit_reached = st.session_state.query_count >= 5
+st.caption(f"Session query limit: {st.session_state.query_count}/5 used ({remaining_queries} left)")
 
 if limit_reached:
     st.error("🛑 You have reached the maximum limit of 5 queries per session. Please refresh the page to start a new session.")
@@ -99,7 +106,7 @@ if st.button("🔍 Analyze", type="primary", use_container_width=True, disabled=
 
                 response = httpx.post(
                     "http://localhost:8000/api/chat",
-                    json={"user_id": "streamlit_user", "query": query.strip()},
+                    json={"user_id": st.session_state.user_id, "query": query.strip()},
                     timeout=120.0,
                 )
 

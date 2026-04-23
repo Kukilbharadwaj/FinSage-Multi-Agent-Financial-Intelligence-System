@@ -2,7 +2,9 @@
 
 **FinSage AI** is a multi-agent financial assistant built specifically for Indian users. Ask questions in plain English about stocks, market indices, mutual funds, salary planning, or taxes — and get real-time analysis with actionable recommendations. 
 
-Additionally, FinSage now exposes its core tools via the **Model Context Protocol (MCP)**, allowing external agents and tools (like Claude Desktop) to connect securely and utilize FinSage's robust financial scraping and analysis tools. The FastAPI + Streamlit flow keeps working even if MCP is not running.
+Additionally, FinSage now exposes its core tools via the **Model Context Protocol (MCP)**, allowing external agents and tools (like Claude Desktop) to connect securely and utilize FinSage's robust financial scraping and analysis tools.
+
+Important integration detail: the FastAPI backend (`main.py`) now acts as the MCP client runtime. This means your backend automatically connects to `mcp_server.py` (if available) and uses MCP tools directly during normal Streamlit requests.
 
 > ⚠️ **Disclaimer:** This is an educational project. Not SEBI-registered investment advice. Always consult a qualified financial advisor before making investment decisions.
 
@@ -23,7 +25,10 @@ Additionally, FinSage now exposes its core tools via the **Model Context Protoco
 
 ## 🏗️ Architecture
 
-FinSage utilizes a multi-agent orchestration framework (LangGraph) backed by multiple specialized tools and RAG systems. It also serves these tools externally via an MCP server.
+FinSage utilizes a multi-agent orchestration framework (LangGraph) backed by multiple specialized tools and RAG systems. MCP is integrated in two ways:
+
+- Internal: backend (`main.py`) connects as MCP client and calls tools during API requests.
+- External: optional clients can connect directly to `mcp_server.py` for testing/integration.
 
 ```mermaid
 graph TD
@@ -47,7 +52,8 @@ graph TD
     
     Synthesis --> Response([Final Recommendation])
     
-    subgraph "External Integration (MCP)"
+    subgraph "MCP Layer"
+        API <-->|SSE MCP Client Runtime| MCP_Server[FastMCP Server]
         MCP_Client[External MCP Client] <-->|SSE| MCP_Server[FastMCP Server]
         MCP_Server --> Tools[(FinSage Tools)]
         Market -.-> Tools
@@ -182,10 +188,10 @@ streamlit run frontend/app.py
 
 ## 🔌 Running the MCP Integration (Proper Flow)
 
-FinSage includes a standalone **Model Context Protocol (MCP)** server and an optional client.
+FinSage includes an MCP server and an integrated MCP client inside backend startup.
 
-- Streamlit + backend can run normally without MCP.
-- If you want MCP tools active, start `mcp_server.py` in another terminal.
+- Required for MCP-enabled app flow: run `mcp_server.py`.
+- `main.py` automatically connects to MCP server and reuses that session for agent tool calls.
 - `mcp_client.py` is optional and only needed for manual MCP testing.
 
 ### Start the MCP Server
@@ -248,6 +254,16 @@ python mcp_server.py
 ```
 
 `mcp_client.py` is optional test tooling only and is not required for Streamlit + backend operation.
+
+### Verify MCP Connection
+Check backend health endpoint after starting all services:
+
+`http://localhost:8000/api/health`
+
+Expected fields in response:
+
+- `mcp_connected: true`
+- `mcp_tools: [...]`
 
 ---
 *Built with ❤️ using Groq, LangGraph, FastAPI, MCP, and Streamlit*

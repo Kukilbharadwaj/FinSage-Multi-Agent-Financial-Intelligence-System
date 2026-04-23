@@ -7,7 +7,7 @@ from groq import Groq
 from config.settings import settings
 from config.models import GROQ_REASONING
 from mcp_bridge import call_mcp_tool, is_mcp_enabled
-from tools.yahoo_tool import get_intraday_data, get_options_chain
+from tools.yahoo_tool import get_intraday_data, get_options_chain, get_indian_market_status
 from tools.technical_tool import calculate_indicators
 from rag.knowledge_base import query_kb
 
@@ -59,10 +59,20 @@ def run(state: dict) -> dict:
             except Exception as e:
                 state["options_chain"] = {"error": str(e)[:100]}
 
+        market_status = (intraday or {}).get("market_status") or get_indian_market_status()
+        is_market_open = bool(market_status.get("is_open"))
+
         # Build analysis prompt
-        system_message = """You are an expert Indian stock market trader specializing in intraday and F&O trading.
-Analyze the data and provide clear, actionable trading signals with specific entry, target, and stop-loss prices.
-Always emphasize risk management. Use ₹ symbol for prices."""
+        system_message = """You are an expert Indian intraday and options analyst.
+    Write like a human mentor, not a bot.
+
+    Rules:
+    1) First decide whether market is OPEN or CLOSED from provided status.
+    2) If market is CLOSED, do NOT give immediate "buy now" or "sell now" calls. Provide a next-session plan with trigger levels.
+    3) If market is OPEN, provide action-ready guidance with trigger-based entry, stop-loss, and fast target windows.
+    4) You may give short-horizon guidance (for example 5-15 minute window), but avoid guaranteed claims.
+    5) Use plain, conversational language with concrete prices in ₹.
+    6) Always include risk guardrails and mention this is educational only."""
 
         # Build data sections
         data_parts = []
@@ -73,7 +83,18 @@ Always emphasize risk management. Use ₹ symbol for prices."""
 - Day High: ₹{intraday.get('day_high', 'N/A')}
 - Day Low: ₹{intraday.get('day_low', 'N/A')}
 - VWAP: ₹{intraday.get('vwap', 'N/A')}
-- Total Volume: {intraday.get('total_volume', 'N/A')}""")
+    - Total Volume: {intraday.get('total_volume', 'N/A')}
+    - Last Candle Time (IST): {intraday.get('last_candle_time_ist', 'N/A')}
+    - Candle Delay: {intraday.get('candle_delay_minutes', 'N/A')} minutes
+    - Live Data: {intraday.get('is_live_data', False)}""")
+
+        data_parts.append(f"""MARKET STATUS (IST):
+    - Status: {market_status.get('status', 'unknown').upper()}
+    - Is Open: {is_market_open}
+    - Current Time: {market_status.get('current_time_ist', 'N/A')}
+    - Next Open: {market_status.get('next_open_ist', 'N/A')}
+    - Today Close: {market_status.get('today_close_ist', 'N/A')}
+    - Note: {market_status.get('reason', 'N/A')}""")
 
         if options_data and "error" not in options_data:
             # Format top calls and puts
@@ -111,14 +132,23 @@ Top Puts (by volume):
 
 {data_string}
 
-Provide a detailed trading analysis:
+    Provide a detailed trading analysis in this style:
 
-1. **Market Outlook**: Current trend direction and strength based on intraday data
-2. **Key Levels**: Support, resistance, VWAP position
-{"3. **Options Analysis**: PCR interpretation, max pain implication, recommended option strategy" if is_options_query else "3. **Intraday Strategy**: Specific entry/exit levels"}
-4. **Trade Setup**: Specific entry price, target price, stop-loss price
-5. **Risk Management**: Position sizing, max risk per trade
-6. **⚠️ Warning**: Include SEBI's data that 9/10 F&O traders lose money
+    1. Market Status Summary (open/closed + what that means right now)
+    2. What I would do now (human style)
+    3. Key levels (support/resistance/VWAP)
+    4. {"Options plan with strikes, triggers, invalidation" if is_options_query else "Intraday plan with trigger, stop-loss, target and time window"}
+    5. Quick scenario plan: if momentum continues vs if reversal starts
+    6. Risk rules: max loss, no revenge trade, position sizing
+    7. ⚠️ Warning: include SEBI's data that 9/10 F&O traders lose money
+
+    If market is CLOSED:
+    - Give "next session preparation" and "opening 15-min observation plan".
+    - No immediate execution command.
+
+    If market is OPEN:
+    - You can give actionable setup like "Buy only above X" / "Sell below Y".
+    - Time window can be short (for example 5-15 min), but no guaranteed return claims.
 
 Be specific with prices in ₹. This is for educational purposes only."""
 
@@ -146,7 +176,7 @@ Be specific with prices in ₹. This is for educational purposes only."""
 
         state["trace"].append(
             f"trading_agent → {symbol} "
-            f"{'options + intraday' if is_options_query else 'intraday'} analysis"
+            f"{'options + intraday' if is_options_query else 'intraday'} analysis ({market_status.get('status', 'unknown')})"
         )
 
     except Exception as e:

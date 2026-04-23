@@ -4,6 +4,8 @@
 
 import yfinance as yf
 from typing import Optional
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 
 # Maps common Indian stock/index names to Yahoo Finance symbols
@@ -197,9 +199,24 @@ def get_intraday_data(symbol: str) -> dict:
         yahoo_symbol = _resolve_symbol(symbol)
         ticker = yf.Ticker(yahoo_symbol)
         df = ticker.history(period="5d", interval="5m")
+        market_status = get_indian_market_status()
 
         if df.empty:
-            return {}
+            return {
+                "market_status": market_status,
+                "error": "No intraday candles returned from Yahoo Finance",
+            }
+
+        last_candle = df.index[-1]
+        if getattr(last_candle, "tzinfo", None) is not None:
+            last_candle_ist = last_candle.tz_convert("Asia/Kolkata")
+        else:
+            # Some providers return naive timestamps. Treat as IST to avoid false UTC conversion.
+            last_candle_ist = last_candle.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+        candle_delay_minutes = max(0, int((now_ist - last_candle_ist.to_pydatetime()).total_seconds() // 60))
+        is_live_data = bool(market_status.get("is_open")) and candle_delay_minutes <= 20
 
         return {
             "close": df["Close"].tolist(),
@@ -213,6 +230,10 @@ def get_intraday_data(symbol: str) -> dict:
             "day_low": round(float(df["Low"].min()), 2),
             "total_volume": int(df["Volume"].sum()),
             "vwap": round(float((df["Close"] * df["Volume"]).sum() / df["Volume"].sum()), 2) if df["Volume"].sum() > 0 else 0,
+            "last_candle_time_ist": last_candle_ist.strftime("%Y-%m-%d %H:%M"),
+            "candle_delay_minutes": candle_delay_minutes,
+            "is_live_data": is_live_data,
+            "market_status": market_status,
         }
 
     except Exception as e:
@@ -322,6 +343,58 @@ def get_ohlcv(symbol: str, period: str = "3mo") -> dict:
 
     except Exception as e:
         raise Exception(f"Yahoo Finance OHLCV error for '{symbol}': {str(e)}")
+
+
+def get_indian_market_status(now_ist: Optional[datetime] = None) -> dict:
+    """Return NSE market open/close status in IST (09:15 to 15:30, Mon-Fri)."""
+    tz = ZoneInfo("Asia/Kolkata")
+    now = now_ist or datetime.now(tz)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+    else:
+        now = now.astimezone(tz)
+
+    market_open_time = time(9, 15)
+    market_close_time = time(15, 30)
+
+    is_weekday = now.weekday() < 5
+    is_open_time = market_open_time <= now.time() <= market_close_time
+    is_open = is_weekday and is_open_time
+
+    if is_open:
+        status = "open"
+        reason = "Indian market session is live."
+    elif not is_weekday:
+        status = "closed"
+        reason = "Weekend: Indian market is closed."
+    elif now.time() < market_open_time:
+        status = "closed"
+        reason = "Pre-market: session has not opened yet."
+    else:
+        status = "closed"
+        reason = "Post-market: session has ended for the day."
+
+    # Compute next open time (simple weekday logic, ignores exchange holidays).
+    next_open_date = now.date()
+    if is_weekday and now.time() < market_open_time:
+        next_open_date = now.date()
+    else:
+        next_open_date = now.date() + timedelta(days=1)
+        while next_open_date.weekday() >= 5:
+            next_open_date += timedelta(days=1)
+
+    next_open_dt = datetime.combine(next_open_date, market_open_time, tzinfo=tz)
+    next_close_dt = datetime.combine(now.date(), market_close_time, tzinfo=tz)
+
+    return {
+        "is_open": is_open,
+        "status": status,
+        "reason": reason,
+        "timezone": "Asia/Kolkata",
+        "current_time_ist": now.strftime("%Y-%m-%d %H:%M"),
+        "next_open_ist": next_open_dt.strftime("%Y-%m-%d %H:%M"),
+        "today_close_ist": next_close_dt.strftime("%Y-%m-%d %H:%M"),
+    }
 
 
 def _format_indian_number(num) -> str:
