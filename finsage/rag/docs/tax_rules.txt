@@ -1,0 +1,108 @@
+INDIAN INCOME TAX RULES — FY 2024-25 (AY 2025-26)
+====================================================
+
+NEW TAX REGIME (DEFAULT FROM FY 2023-24 ONWARDS)
+-------------------------------------------------
+Income Slab (₹)            Tax Rate
+Up to 3,00,000             Nil
+3,00,001 to 7,00,000       5%
+7,00,001 to 10,00,000      10%
+10,00,001 to 12,00,000     15%
+12,00,001 to 15,00,000     20%
+Above 15,00,000            30%
+
+Standard deduction: ₹75,000 for salaried individuals under new regime (Budget 2024).
+Rebate under Section 87A: Full rebate for taxable income up to ₹7,00,000.
+
+OLD TAX REGIME (OPTIONAL, MUST OPT-IN)
+---------------------------------------
+Income Slab (₹)            Tax Rate
+Up to 2,50,000             Nil
+2,50,001 to 5,00,000       5%
+5,00,001 to 10,00,000      20%
+Above 10,00,000            30%
+
+Old regime allows deductions under 80C, 80D, HRA, LTA, etc.
+Standard deduction: ₹50,000 under old regime.
+
+CAPITAL GAINS TAX ON EQUITY (POST JULY 2024 BUDGET CHANGES)
+============================================================
+
+SHORT TERM CAPITAL GAINS (STCG) ON EQUITY:
+- Holding period: Less than 12 months
+- Tax rate: 20% flat (increased from 15% in Budget 2024)
+- Applies to listed equity shares and equity mutual funds
+- STT (Securities Transaction Tax) must have been paid at time of purchase/sale
+
+LONG TERM CAPITAL GAINS (LTCG) ON EQUITY:
+- Holding period: 12 months or more
+- Tax rate: 12.5% above ₹1.25 lakh annual exemption (changed from 10% above ₹1 lakh)
+- Applies to listed equity shares and equity mutual funds
+- No indexation benefit for equity
+- Annual exemption: First ₹1,25,000 of LTCG is tax-free
+
+CAPITAL GAINS ON DEBT FUNDS (POST APRIL 2023 CHANGES):
+- STCG on debt funds: Added to income, taxed at slab rate
+- LTCG on debt funds: Also taxed at slab rate (indexation benefit removed from April 2023)
+- This applies to all debt mutual funds, gold funds, and international funds purchased after April 1, 2023
+
+SECTION 80C DEDUCTIONS (OLD REGIME ONLY)
+=========================================
+Maximum deduction: ₹1,50,000 per financial year
+
+Eligible instruments:
+1. ELSS (Equity Linked Savings Scheme) — 3-year lock-in, market-linked
+2. PPF (Public Provident Fund) — 15-year lock-in, currently 7.1% p.a., tax-free maturity
+3. LIC Premium — life insurance premiums
+4. NPS (National Pension System) — Tier 1 contributions
+5. ULIP (Unit Linked Insurance Plan) — insurance + investment combo
+6. NSC (National Savings Certificate) — 5-year lock-in, fixed interest
+7. Sukanya Samriddhi Yojana — for girl child, high interest
+8. Home loan principal repayment
+9. 5-year Fixed Deposit (tax saving FD)
+10. Tuition fees for children (up to 2 children)
+11. EPF (Employee Provident Fund) — employer deducts from salary
+
+SECTION 80CCD(1B) — ADDITIONAL NPS DEDUCTION
+=============================================
+Additional ₹50,000 deduction over and above 80C limit.
+Available in both old and new tax regimes (new regime allows only this and standard deduction).
+Total NPS benefit: ₹1,50,000 (under 80C) + ₹50,000 (under 80CCD(1B)) = ₹2,00,000.
+
+SECTION 80D — HEALTH INSURANCE DEDUCTION
+==========================================
+For self/spouse/children:
+- Up to ₹25,000 for individuals below 60 years
+- Up to ₹50,000 for senior citizens (60+ years)
+
+For parents:
+- Additional ₹25,000 (below 60) or ₹50,000 (senior citizen)
+
+Maximum total: ₹1,00,000 (if both self and parents are senior citizens)
+Preventive health check-up: ₹5,000 included within above limits.
+
+TAX-LOSS HARVESTING
+====================
+- Book unrealized losses before March 31 each year to offset against capital gains
+- STCL (Short Term Capital Loss) can offset both STCG and LTCG
+- LTCL (Long Term Capital Loss) can only offset LTCG
+- Unabsorbed losses can be carried forward for 8 assessment years
+- Wash sale rule: No specific rule in India, but transactions must be genuine
+- Strategy: Sell losing positions, book loss, re-enter after settlement if still bullish
+
+SECURITIES TRANSACTION TAX (STT)
+=================================
+- Equity delivery buy: 0.1% of transaction value
+- Equity delivery sell: 0.1% of transaction value
+- Intraday sell: 0.025% of transaction value
+- Futures sell: 0.0125% of transaction value
+- Options sell (on premium): 0.1% of premium (increased in Budget 2024)
+- STT is not a separate deductible; it is part of cost of acquisition
+
+SURCHARGE ON INCOME TAX
+========================
+- Income above ₹50 lakh: 10% surcharge
+- Income above ₹1 crore: 15% surcharge
+- Income above ₹2 crore: 25% surcharge
+- Income above ₹5 crore: 37% surcharge (capped at 25% for capital gains)
+- Health and Education Cess: 4% on tax + surcharge

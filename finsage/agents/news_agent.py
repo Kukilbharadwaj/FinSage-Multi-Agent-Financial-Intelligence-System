@@ -1,0 +1,95 @@
+# agents/news_agent.py
+# Fetches news headlines and scores sentiment.
+# Model: GROQ_FAST (llama-3.1-8b-instant) — fast sentiment scoring on many headlines
+
+import json
+from groq import Groq
+from config.settings import settings
+from config.models import GROQ_FAST
+from tools.news_tool import get_news
+
+
+def run(state: dict) -> dict:
+    """
+    Fetch news for the detected stock/index and score overall sentiment.
+
+    Stores articles in state["news"] and sentiment score in state["sentiment_score"].
+    """
+    try:
+        entities = state.get("entities", {})
+
+        # Determine search query
+        query = (
+            entities.get("stock")
+            or entities.get("index")
+            or "Indian stock market"
+        )
+
+        # Fetch news articles
+        articles = get_news(query, limit=10)
+        state["news"] = articles
+
+        if not articles:
+            state["sentiment_score"] = 0.0
+            state["trace"].append("news_agent → no articles found, sentiment = 0.0")
+            return state
+
+        # Format top headlines for sentiment analysis
+        top_headlines = articles[:8]
+        headlines_text = "\n".join(
+            f"{i+1}. {article['title']}" for i, article in enumerate(top_headlines)
+        )
+
+        # Call Groq for sentiment scoring
+        try:
+            client = Groq(api_key=settings.GROQ_API_KEY)
+
+            sentiment_prompt = f"""Analyze the overall sentiment of these Indian financial news headlines.
+
+Headlines:
+{headlines_text}
+
+Score the overall sentiment from -1.0 (very negative/bearish) to 1.0 (very positive/bullish).
+Consider: market crash fears = negative, rally/gains = positive, mixed news = near 0.
+
+Respond ONLY with valid JSON in this exact format, nothing else:
+{{"score": 0.0, "summary": "one line summary of overall market mood"}}"""
+
+            response = client.chat.completions.create(
+                model=GROQ_FAST,
+                messages=[
+                    {"role": "system", "content": "You are a financial news sentiment analyzer. Respond only with JSON."},
+                    {"role": "user", "content": sentiment_prompt},
+                ],
+                temperature=0.0,
+                max_tokens=150,
+            )
+
+            raw_response = response.choices[0].message.content.strip()
+
+            # Parse JSON response
+            json_str = raw_response
+            if "```" in json_str:
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+                json_str = json_str.strip()
+
+            result = json.loads(json_str)
+            score = float(result.get("score", 0.0))
+
+            # Clamp score to valid range
+            score = max(-1.0, min(1.0, score))
+            state["sentiment_score"] = round(score, 2)
+
+        except (json.JSONDecodeError, Exception):
+            state["sentiment_score"] = 0.0
+
+        state["trace"].append(f"news_agent → sentiment {state['sentiment_score']}")
+
+    except Exception as e:
+        state["news"] = []
+        state["sentiment_score"] = 0.0
+        state["trace"].append(f"news_agent → ERROR: {str(e)[:100]}")
+
+    return state

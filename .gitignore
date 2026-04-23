@@ -1,0 +1,17 @@
+# Environments
+venv/
+env/
+.env
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Models and DB
+finsage/model_cache/
+finsage/finsage.db
+finsage/db/finsage.db
+
+# Other
+.DS_Store
