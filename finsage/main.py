@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
 from db.database import init_db
+from mcp_runtime import startup_mcp_runtime, shutdown_mcp_runtime
 
 # Create FastAPI app
 app = FastAPI(
@@ -33,11 +34,18 @@ app.include_router(router, prefix="/api")
 
 
 @app.on_event("startup")
-def startup():
+async def startup():
     """Initialize database on application startup."""
     init_db()
+    await startup_mcp_runtime()
     print("[OK] FinSage AI backend started")
     print("[API] API docs: http://localhost:8000/docs")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Cleanup resources on application shutdown."""
+    await shutdown_mcp_runtime()
 
 
 if __name__ == "__main__":

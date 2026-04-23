@@ -6,6 +6,7 @@
 from groq import Groq
 from config.settings import settings
 from config.models import GROQ_REASONING
+from mcp_bridge import call_mcp_tool, is_mcp_enabled
 from rag.knowledge_base import query_kb
 
 
@@ -30,14 +31,20 @@ def run(state: dict) -> dict:
         # Try to fetch fund data from mftool
         mf_data = {}
         try:
-            from tools.mf_tool import get_mf_details, search_mf_schemes
+            from tools.mf_tool import get_mf_details
 
             if fund_name:
-                mf_data = get_mf_details(fund_name)
+                if is_mcp_enabled():
+                    mf_data = call_mcp_tool("mf_details", {"query": fund_name})
+                else:
+                    mf_data = get_mf_details(fund_name)
             else:
                 # Try to extract fund name from raw query
                 query = state.get("raw_query", "")
-                mf_data = get_mf_details(query)
+                if is_mcp_enabled():
+                    mf_data = call_mcp_tool("mf_details", {"query": query})
+                else:
+                    mf_data = get_mf_details(query)
 
             if "error" not in mf_data:
                 state["mutual_fund_data"] = mf_data

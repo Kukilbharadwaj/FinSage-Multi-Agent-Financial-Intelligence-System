@@ -6,6 +6,7 @@
 from groq import Groq
 from config.settings import settings
 from config.models import GROQ_REASONING
+from mcp_bridge import call_mcp_tool, is_mcp_enabled
 from tools.yahoo_tool import get_intraday_data, get_options_chain
 from tools.technical_tool import calculate_indicators
 from rag.knowledge_base import query_kb
@@ -32,7 +33,10 @@ def run(state: dict) -> dict:
         # Fetch intraday data
         intraday = {}
         try:
-            intraday = get_intraday_data(symbol)
+            if is_mcp_enabled():
+                intraday = call_mcp_tool("intraday_data", {"symbol": symbol})
+            else:
+                intraday = get_intraday_data(symbol)
             state["intraday_data"] = intraday
         except Exception as e:
             state["intraday_data"] = {"error": str(e)[:100]}
@@ -47,7 +51,10 @@ def run(state: dict) -> dict:
 
         if is_options_query:
             try:
-                options_data = get_options_chain(symbol)
+                if is_mcp_enabled():
+                    options_data = call_mcp_tool("options_chain", {"symbol": symbol})
+                else:
+                    options_data = get_options_chain(symbol)
                 state["options_chain"] = options_data
             except Exception as e:
                 state["options_chain"] = {"error": str(e)[:100]}

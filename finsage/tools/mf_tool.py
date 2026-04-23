@@ -5,7 +5,13 @@
 from mftool import Mftool
 
 # Singleton instance
-_mf = Mftool()
+_mf = None
+
+def _get_mf():
+    global _mf
+    if _mf is None:
+        _mf = Mftool()
+    return _mf
 
 # Popular Indian Mutual Fund scheme codes (AMFI codes)
 MF_SCHEME_MAP = {
@@ -77,7 +83,7 @@ def get_mf_nav(scheme_code: str) -> dict:
         Dict with scheme_name, nav, date, scheme_code
     """
     try:
-        data = _mf.get_scheme_quote(scheme_code)
+        data = _get_mf().get_scheme_quote(scheme_code)
         if not data:
             return {"error": f"No data found for scheme code {scheme_code}"}
 
@@ -101,7 +107,7 @@ def get_mf_history(scheme_code: str) -> dict:
     Returns dict with nav_values (list of {date, nav}) for performance calculation.
     """
     try:
-        data = _mf.get_scheme_historical_nav(scheme_code, as_Dataframe=False)
+        data = _get_mf().get_scheme_historical_nav(scheme_code, as_Dataframe=False)
         if not data or "data" not in data:
             return {"error": "No historical data available"}
 
@@ -134,7 +140,7 @@ def search_mf_schemes(query: str) -> list:
                 return [{"scheme_code": code, "scheme_name": nav_data.get("scheme_name", query)}]
 
         # Search via mftool
-        results = _mf.get_scheme_codes(as_Dataframe=False)
+        results = _get_mf().get_scheme_codes(as_Dataframe=False)
         if not results:
             return []
 

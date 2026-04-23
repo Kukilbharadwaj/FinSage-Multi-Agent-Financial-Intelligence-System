@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from groq import Groq
 from config.settings import settings
 from config.models import GROQ_STANDARD
+from mcp_bridge import call_mcp_tool, is_mcp_enabled
 from tools.nse_tool import get_nse_quote
 from tools.yahoo_tool import get_stock_data, get_company_profile
 
@@ -24,14 +25,22 @@ def run(state: dict) -> dict:
         # Determine symbol to look up
         symbol = entities.get("stock") or entities.get("index") or "NIFTY 50"
 
-        # Try NSE first, fall back to Yahoo Finance
+        # Try MCP tools first (if enabled), then local tools as fallback.
         source = "NSE"
         try:
-            market_data = get_nse_quote(symbol)
+            if is_mcp_enabled():
+                market_data = call_mcp_tool("nse_quote", {"symbol": symbol})
+                source = "MCP:NSE"
+            else:
+                market_data = get_nse_quote(symbol)
         except Exception as nse_error:
             source = "Yahoo Finance"
             try:
-                market_data = get_stock_data(symbol)
+                if is_mcp_enabled():
+                    market_data = call_mcp_tool("stock_data", {"symbol": symbol})
+                    source = "MCP:Yahoo"
+                else:
+                    market_data = get_stock_data(symbol)
             except Exception as yahoo_error:
                 state["market_data"] = {
                     "symbol": symbol,
@@ -49,7 +58,10 @@ def run(state: dict) -> dict:
         profile = {}
         if intent == "stock":
             try:
-                profile = get_company_profile(symbol)
+                if is_mcp_enabled():
+                    profile = call_mcp_tool("company_profile", {"symbol": symbol})
+                else:
+                    profile = get_company_profile(symbol)
                 state["company_profile"] = profile
             except Exception:
                 state["company_profile"] = {}

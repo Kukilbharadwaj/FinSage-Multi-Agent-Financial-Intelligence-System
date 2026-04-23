@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from agents.graph import app_graph
 from db.database import get_db
 from db.crud import save_query_log, get_recent_queries
+from mcp_runtime import has_live_session, get_tools
 
 router = APIRouter()
 
@@ -97,7 +98,12 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
 @router.get("/health")
 def health():
     """Health check endpoint."""
-    return {"status": "ok", "version": "0.1.0"}
+    return {
+        "status": "ok",
+        "version": "0.1.0",
+        "mcp_connected": has_live_session(),
+        "mcp_tools": get_tools(),
+    }
 
 
 @router.get("/history/{user_id}")
