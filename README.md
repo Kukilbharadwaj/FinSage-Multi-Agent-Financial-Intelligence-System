@@ -1,6 +1,8 @@
-# FinSage AI: Indian Financial Assistant
+# FinSage AI: Multi-Agent Indian Financial Intelligence System
 
-FinSage AI is a multi-agent financial assistant for Indian users. It answers practical questions on stocks, indices, mutual funds, tax, salary planning, insurance, loans, retirement, and trading using a LangGraph agent workflow, live market tools, and retrieval-augmented context.
+FinSage AI is an advanced multi-agent financial assistant for Indian users, built on a **Supervisor-planned, dependency-staged, review-gated architecture**. It answers practical questions on stocks, indices, mutual funds, tax, salary planning, insurance, loans, retirement, and trading using LangGraph orchestration, live market tools, and retrieval-augmented context.
+
+The system uses a **Supervisor Agent** that dynamically selects which specialist agents to invoke, a **shared state communication bus** for inter-agent data flow, and a **Review Agent** that validates all outputs before final synthesis.
 
 The project supports two execution styles:
 
@@ -11,63 +13,61 @@ Important: this project is for educational and informational use only. It is not
 
 ## Features
 
+- **Supervisor Agent** with LLM-based planning and dynamic agent selection (replaces keyword-based intent routing)
+- **Dependency-aware 5-stage execution pipeline**: Stage 1 (independent) → Stage 2 (reads Stage 1) → Stage 3 (reads Stage 1+2) → Review → Synthesis
+- **Shared state communication bus**: agents exchange structured data via `FinSageState` — no direct agent-to-agent calls
+- **Review/Critic Agent** validates all outputs for contradictions, missing data, and plan completion before synthesis
+- **On-demand RAG service** with domain-specific query expansion (Tax, Salary, MF, Market agents call RAG when needed)
+- **Confidence blending**: 60% LLM self-assessment + 40% Review Agent score
 - Multi-agent orchestration with LangGraph
 - FastAPI backend with structured API responses
 - Gradio chat UI with example prompts, confidence score, trace, and recent history
 - MCP server integration for tool invocation
-- RAG-backed context for tax and finance rules
 - Local persistence for query logs via SQLite
 
 ## High-Level Architecture
 
 ```mermaid
-graph TB
-
-    %% USER FLOW
+graph TD
     User[👤 User] --> UI[🖥️ Gradio UI]
     UI --> API[⚡ FastAPI Backend]
-    API --> Orchestrator[🧠 LangGraph Orchestrator]
+    API --> Supervisor[🧠 Supervisor Agent]
 
-    %% AGENTS
-    subgraph Agents
-        direction LR
-        Intent[🎯 Intent]
-        Market[📈 Market]
-        MF[📊 Mutual Fund]
-        Tax[🧾 Tax]
-        Salary[💰 Salary]
-        News[📰 News]
-        Synthesis[🧩 Synthesis]
+    Supervisor -->|"selected_agents + execution_plan"| Dispatcher{Stage Dispatcher}
+
+    subgraph "Stage 1 — Independent"
+        Salary[💰 Salary Agent]
+        News[📰 News Agent]
+        GenFin[📋 General Finance]
     end
 
-    Orchestrator --> Intent
-    Orchestrator --> Market
-    Orchestrator --> MF
-    Orchestrator --> Tax
-    Orchestrator --> Salary
-    Orchestrator --> News
+    subgraph "Stage 2 — Reads Stage 1"
+        Tax["🧾 Tax Agent ← salary_analysis"]
+        Market["📈 Market Agent ← news_analysis"]
+    end
 
-    %% FLOW TO SYNTHESIS
-    Market --> Synthesis
-    MF --> Synthesis
-    Tax --> Synthesis
-    Salary --> Synthesis
-    News --> Synthesis
+    subgraph "Stage 3 — Reads Stage 1+2"
+        MF["📊 MF Agent ← salary+tax+market"]
+        Trading["📉 Trading Agent ← market"]
+        Technical["📐 Technical Agent"]
+    end
 
+    Dispatcher --> Salary & News & GenFin
+    Salary & News & GenFin --> Tax & Market
+    Tax & Market --> MF & Trading & Technical
+
+    MF & Trading & Technical --> Review[🔍 Review Agent]
+    Review --> Synthesis[🧩 Synthesis Agent]
     Synthesis --> Response[✅ Final Recommendation]
 
-    %% RAG (LAW + KNOWLEDGE)
-    subgraph RAG_Knowledge
-        direction TB
-        Docs[📚 Financial Laws and Rules GST Income Tax Policies]
-        VectorDB[🧠 Vector Store]
-    end
+    %% RAG ON-DEMAND
+    RAG[📚 RAG Agent — On-Demand Service]
+    Salary -.->|calls| RAG
+    Tax -.->|calls| RAG
+    MF -.->|calls| RAG
+    Market -.->|"when needed"| RAG
 
-    Tax --> Docs
-    Salary --> Docs
-    Docs --> VectorDB
-
-    %% MCP (REAL-TIME DATA)
+    %% MCP TOOLS
     subgraph MCP_Tools
         direction TB
         MCPClient[🔌 MCP Client]
@@ -77,14 +77,38 @@ graph TB
 
     Market --> MCPClient
     MF --> MCPClient
-    News --> MCPClient
-
+    Trading --> MCPClient
     MCPClient --> MCPServer
     MCPServer --> Tools
 
     %% STORAGE
     API --> DB[(🗄️ SQLite)]
 ```
+
+## Agent Communication (Shared State Bus)
+
+Agents communicate exclusively through structured dicts in `FinSageState`. No direct agent-to-agent calls.
+
+| State Key | Written By | Read By |
+|-----------|-----------|--------|
+| `salary_analysis` | Salary Agent | Tax Agent, MF Agent |
+| `tax_analysis` | Tax Agent | MF Agent |
+| `news_analysis` | News Agent | Market Agent |
+| `market_analysis` | Market Agent | Trading Agent, MF Agent |
+| `review_output` | Review Agent | Synthesis Agent |
+
+### Execution Example
+
+Query: `"I earn 12 LPA. How can I reduce taxes and invest wisely?"`
+
+| Stage | Agents Run | Data Flow |
+|-------|-----------|----------|
+| Supervisor | — | `selected_agents=["salary","tax","mutual_fund","market"]` |
+| Stage 1 | Salary | writes `salary_analysis` |
+| Stage 2 | Tax, Market | Tax reads `salary_analysis` |
+| Stage 3 | MF | reads `salary_analysis` + `tax_analysis` + `market_analysis` |
+| Review | Review | validates all outputs, scores confidence |
+| Synthesis | Synthesis | combines everything into final recommendation |
 
 ## Tech Stack
 
@@ -103,19 +127,36 @@ graph TB
 finsage/
     app.py                  # HF Spaces entrypoint (orchestrates MCP + backend + UI)
     main.py                 # FastAPI backend entrypoint
-    mcp_server.py           # MCP server
+    mcp_server.py           # MCP server (NSE, Yahoo, MF, News tools)
     mcp_client.py           # Optional MCP test client
+    mcp_bridge.py           # MCP tool bridge for agents
+    mcp_runtime.py          # MCP session lifecycle manager
     requirements.txt
-    README.md
 
-    agents/                 # LangGraph nodes and state
-    api/                    # FastAPI routes
-    config/                 # Settings and model config
-    db/                     # Database setup and CRUD
+    agents/
+        state.py            # FinSageState TypedDict (shared communication bus)
+        graph.py            # LangGraph StateGraph (supervisor → stages → review → synthesis)
+        supervisor_agent.py # [NEW] LLM-based planner and dynamic agent selector
+        rag_agent.py        # [NEW] On-demand RAG service with query expansion
+        review_agent.py     # [NEW] Critic that validates outputs before synthesis
+        salary_agent.py     # Stage 1: writes salary_analysis
+        news_agent.py       # Stage 1: writes news_analysis
+        general_finance_agent.py  # Stage 1: writes general_finance_result
+        tax_agent.py        # Stage 2: reads salary_analysis, writes tax_analysis
+        market_agent.py     # Stage 2: reads news_analysis, writes market_analysis
+        mutual_fund_agent.py # Stage 3: reads salary+tax+market, writes mf_analysis
+        trading_agent.py    # Stage 3: reads market_analysis, writes trading_analysis_output
+        technical_agent.py  # Stage 3: writes technical_analysis
+        synthesis_agent.py  # Final: reads all outputs + review_output
+        intent_agent.py     # [LEGACY] kept for reference, not in graph
+
+    api/                    # FastAPI routes (/chat, /health, /history)
+    config/                 # Settings and model config (Groq models)
+    db/                     # SQLite database setup and CRUD
     frontend/               # Gradio UI implementation
-    rag/                    # Embedding + FAISS knowledge base
-    tools/                  # Financial tool integrations
-    scripts/                # Utility scripts (ingest/test)
+    rag/                    # FAISS vector store + sentence-transformers embedder
+    tools/                  # Financial tool integrations (NSE, Yahoo, MF, News, TA)
+    scripts/                # Utility scripts (ingest_docs, test_query, verify_imports)
 ```
 
 ## API Contract
@@ -325,6 +366,23 @@ Fix:
 - frontend/app.py contains create_ui(), used by both direct UI run and app.py orchestrator mode.
 - app.py is intended for orchestrated startup in environments that only execute one entry file.
 - main.py remains the standalone backend entrypoint.
+- intent_agent.py is kept as legacy reference but is no longer wired into the graph.
+
+## Architecture v2 Summary
+
+The system was refactored from a simple `Intent → Route → Synthesize` pipeline to:
+
+```
+Supervisor → Stage 1 (independent) → Stage 2 (reads Stage 1) → Stage 3 (reads Stage 1+2) → Review → Synthesis
+```
+
+Key design decisions:
+
+- **Supervisor over Intent**: LLM-based multi-agent selection instead of keyword routing
+- **Staged execution**: Dependency-aware ordering ensures upstream data exists before downstream agents run
+- **On-demand RAG**: Not a graph node — agents call `rag_agent.retrieve_for_agent()` only when they need knowledge context
+- **Review gate**: Catches contradictions, missing data, and unsupported claims before synthesis
+- **Confidence blending**: Final confidence = 60% LLM self-assessment + 40% Review Agent score
 
 ## License and Disclaimer
 

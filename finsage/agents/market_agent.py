@@ -1,6 +1,9 @@
 # agents/market_agent.py
 # Fetches and summarizes live stock/index data WITH company fundamentals.
 # Model: GROQ_STANDARD (llama-3.3-70b-versatile)
+#
+# Stage 2 agent — reads news_analysis from shared state.
+# Writes: state["market_analysis"] (read by trading_agent, mutual_fund_agent)
 
 from datetime import datetime, timezone
 from groq import Groq
@@ -15,8 +18,16 @@ def run(state: dict) -> dict:
     """
     Fetch live market data AND company fundamentals for the detected stock/index.
 
-    Tries NSE first for price, falls back to Yahoo Finance.
-    Also fetches company profile for stock queries.
+    Reads from shared state:
+        - news_analysis: sentiment_score, market_mood, key_events (if available)
+
+    Writes state["market_analysis"] with structured output:
+        - market_data: raw price data dict
+        - company_profile: fundamental data dict
+        - sentiment: "positive" | "negative" | "neutral"
+        - volatility: "low" | "medium" | "high"
+        - timing_recommendation: text advice on timing
+        - summary: LLM-generated market summary
     """
     try:
         entities = state.get("entities", {})
@@ -25,8 +36,15 @@ def run(state: dict) -> dict:
         # Determine symbol to look up
         symbol = entities.get("stock") or entities.get("index") or "NIFTY 50"
 
+        # ── Read upstream: news_analysis from shared state ──
+        news_info = state.get("news_analysis") or {}
+        news_sentiment = news_info.get("sentiment_score", 0)
+        market_mood = news_info.get("market_mood", "neutral")
+        key_events = news_info.get("key_events", "")
+
         # Try MCP tools first (if enabled), then local tools as fallback.
         source = "NSE"
+        market_data = {}
         try:
             if is_mcp_enabled():
                 market_data = call_mcp_tool("nse_quote", {"symbol": symbol})
@@ -42,35 +60,40 @@ def run(state: dict) -> dict:
                 else:
                     market_data = get_stock_data(symbol)
             except Exception as yahoo_error:
-                state["market_data"] = {
-                    "symbol": symbol,
-                    "error": f"NSE: {str(nse_error)[:80]} | Yahoo: {str(yahoo_error)[:80]}",
-                    "source": "unavailable",
+                state["market_analysis"] = {
+                    "market_data": {
+                        "symbol": symbol,
+                        "error": f"NSE: {str(nse_error)[:80]} | Yahoo: {str(yahoo_error)[:80]}",
+                        "source": "unavailable",
+                    },
+                    "company_profile": {},
+                    "sentiment": market_mood,
+                    "volatility": "unknown",
+                    "timing_recommendation": "Data unavailable — wait for market data before making decisions.",
+                    "summary": f"Could not fetch market data for {symbol}.",
                 }
                 state["data_freshness"] = datetime.now(timezone.utc).isoformat()
                 state["trace"].append(f"market_agent → {symbol} data fetch FAILED")
                 return state
 
-        state["market_data"] = market_data
         state["data_freshness"] = datetime.now(timezone.utc).isoformat()
 
         # Fetch company profile for stock queries (not index queries)
         profile = {}
-        if intent == "stock":
+        if intent == "stock" or (entities.get("stock") and intent != "index"):
             try:
                 if is_mcp_enabled():
                     profile = call_mcp_tool("company_profile", {"symbol": symbol})
                 else:
                     profile = get_company_profile(symbol)
-                state["company_profile"] = profile
             except Exception:
-                state["company_profile"] = {}
+                profile = {}
 
-        # Generate summary using Groq
+        # ── Build LLM summary with news context ──
         try:
             client = Groq(api_key=settings.GROQ_API_KEY)
 
-            # Build richer prompt with fundamentals
+            # Build richer prompt with fundamentals + news sentiment
             fundamentals_text = ""
             if profile:
                 fundamentals_text = f"""
@@ -88,9 +111,18 @@ Company Fundamentals:
 - Beta: {profile.get('beta', 'N/A')}
 - About: {profile.get('description', 'N/A')[:300]}"""
 
+            news_context = ""
+            if news_sentiment != 0 or key_events:
+                news_context = f"""
+News Sentiment Context:
+- Sentiment Score: {news_sentiment} ({market_mood})
+- Key Events: {key_events}"""
+
             summary_prompt = f"""Summarize the following market data and company profile in a comprehensive analysis.
 Mention current price, change %, 52-week position, and if available: P/E valuation (is it overvalued/undervalued vs sector), 
 dividend yield attractiveness, debt health, and growth prospects.
+Also assess market timing: is this a good entry point?
+Estimate volatility as low/medium/high based on price range and beta.
 Be specific with numbers. Use ₹ symbol for Indian stocks.
 
 Market Data:
@@ -102,7 +134,12 @@ Market Data:
 - 52-Week High: {market_data.get('52w_high', 'N/A')}
 - 52-Week Low: {market_data.get('52w_low', 'N/A')}
 - Data Source: {market_data.get('source', source)}
-{fundamentals_text}"""
+{fundamentals_text}
+{news_context}
+
+At the end, include:
+Volatility: low/medium/high
+Timing: one sentence recommendation"""
 
             response = client.chat.completions.create(
                 model=GROQ_STANDARD,
@@ -111,23 +148,60 @@ Market Data:
                     {"role": "user", "content": summary_prompt},
                 ],
                 temperature=0.3,
-                max_tokens=500,
+                max_tokens=600,
             )
 
-            state["market_data"]["summary"] = response.choices[0].message.content.strip()
+            summary_text = response.choices[0].message.content.strip()
+
+            # Estimate volatility from summary or data
+            volatility = "medium"
+            summary_lower = summary_text.lower()
+            if "high volatility" in summary_lower or "volatile" in summary_lower:
+                volatility = "high"
+            elif "low volatility" in summary_lower or "stable" in summary_lower:
+                volatility = "low"
+
+            # Extract timing recommendation
+            timing = "No specific timing recommendation available."
+            for line in summary_text.split("\n"):
+                if "timing" in line.lower():
+                    timing = line.strip().lstrip("- ").lstrip("*").strip()
+                    break
 
         except Exception as llm_error:
-            # If LLM fails, create a simple summary from raw data
-            state["market_data"]["summary"] = (
+            summary_text = (
                 f"{market_data.get('symbol', 'N/A')} is trading at ₹{market_data.get('price', 'N/A')} "
                 f"({market_data.get('change', 'N/A')}% change). "
                 f"52-week range: ₹{market_data.get('52w_low', 'N/A')} - ₹{market_data.get('52w_high', 'N/A')}."
             )
+            volatility = "medium"
+            timing = "Review market data before making decisions."
 
-        state["trace"].append(f"market_agent → {symbol} fetched from {source}" + (" + fundamentals" if profile else ""))
+        # ── Write structured output to communication bus ──
+        state["market_analysis"] = {
+            "market_data": market_data,
+            "company_profile": profile,
+            "sentiment": market_mood,
+            "volatility": volatility,
+            "timing_recommendation": timing,
+            "summary": summary_text,
+        }
+
+        state["trace"].append(
+            f"market_agent → {symbol} fetched from {source}"
+            + (" + fundamentals" if profile else "")
+            + (f" + news sentiment ({market_mood})" if news_sentiment != 0 else "")
+        )
 
     except Exception as e:
-        state["market_data"] = {"error": str(e)[:200]}
+        state["market_analysis"] = {
+            "market_data": {"error": str(e)[:200]},
+            "company_profile": {},
+            "sentiment": "neutral",
+            "volatility": "unknown",
+            "timing_recommendation": "Error occurred — cannot assess timing.",
+            "summary": f"Market analysis error: {str(e)[:200]}",
+        }
         state["data_freshness"] = datetime.now(timezone.utc).isoformat()
         state["trace"].append(f"market_agent → ERROR: {str(e)[:100]}")
 

@@ -1,6 +1,10 @@
 # agents/technical_agent.py
 # Calculates and interprets technical indicators.
 # Model: GROQ_REASONING (qwen/qwen3-32b) — step-by-step reasoning for TA interpretation
+#
+# Stage 3 agent — no upstream dependencies (pure calculation + LLM interpretation).
+# Does NOT use RAG.
+# Writes: state["technical_analysis"]
 
 from groq import Groq
 from config.settings import settings
@@ -24,11 +28,13 @@ def run(state: dict) -> dict:
     Fetch OHLCV data, calculate technical indicators, and use qwq-32b
     to reason through the trading signal step by step.
 
-    Stores results in state["technical_signals"] and state["ohlcv"].
+    Writes state["technical_analysis"] with structured output:
+        - signals: dict of calculated indicators (ema20, ema50, rsi, macd, etc.)
+        - ohlcv: raw OHLCV data
+        - analysis: LLM interpretation text
     """
     try:
         entities = state.get("entities", {})
-        intent = state.get("intent", "")
 
         # Determine symbol
         symbol = entities.get("stock") or entities.get("index") or "NIFTY 50"
@@ -41,17 +47,24 @@ def run(state: dict) -> dict:
             yahoo_symbol = symbol
 
         # Fetch OHLCV data
+        ohlcv = {}
         try:
             ohlcv = get_ohlcv(yahoo_symbol, period="3mo")
-            state["ohlcv"] = ohlcv
         except Exception as ohlcv_error:
-            state["ohlcv"] = {}
-            state["technical_signals"] = {"error": f"Could not fetch OHLCV: {str(ohlcv_error)[:100]}"}
+            state["technical_analysis"] = {
+                "signals": {},
+                "ohlcv": {},
+                "analysis": f"Could not fetch OHLCV: {str(ohlcv_error)[:100]}",
+            }
             state["trace"].append(f"technical_agent → OHLCV fetch failed for {symbol}")
             return state
 
         if not ohlcv or not ohlcv.get("close"):
-            state["technical_signals"] = {"error": "Insufficient OHLCV data"}
+            state["technical_analysis"] = {
+                "signals": {},
+                "ohlcv": {},
+                "analysis": "Insufficient OHLCV data for technical analysis",
+            }
             state["trace"].append(f"technical_agent → insufficient data for {symbol}")
             return state
 
@@ -59,7 +72,11 @@ def run(state: dict) -> dict:
         indicators = calculate_indicators(ohlcv)
 
         if not indicators:
-            state["technical_signals"] = {"error": "Indicator calculation failed — insufficient data points"}
+            state["technical_analysis"] = {
+                "signals": {},
+                "ohlcv": ohlcv,
+                "analysis": "Indicator calculation failed — insufficient data points",
+            }
             state["trace"].append(f"technical_agent → indicator calculation failed for {symbol}")
             return state
 
@@ -91,7 +108,8 @@ Step 5: Suggest a stop-loss price level based on the support level. Calculate th
 
 Be specific with numbers. Use ₹ symbol for prices. Keep your analysis practical for Indian retail investors."""
 
-        # Call qwen3-32b reasoning model
+        analysis_text = ""
+
         try:
             client = Groq(api_key=settings.GROQ_API_KEY)
 
@@ -106,26 +124,27 @@ Be specific with numbers. Use ₹ symbol for prices. Keep your analysis practica
                 reasoning_format="hidden",
             )
 
-            analysis = response.choices[0].message.content.strip()
-
-            # Store both raw indicators and LLM analysis
-            state["technical_signals"] = {
-                **indicators,
-                "analysis": analysis,
-            }
+            analysis_text = response.choices[0].message.content.strip()
 
         except Exception as llm_error:
-            # If LLM fails, store raw indicators without analysis
-            state["technical_signals"] = {
-                **indicators,
-                "analysis": f"Technical analysis interpretation unavailable: {str(llm_error)[:100]}",
-            }
+            analysis_text = f"Technical analysis interpretation unavailable: {str(llm_error)[:100]}"
+
+        # ── Write structured output to communication bus ──
+        state["technical_analysis"] = {
+            "signals": indicators,
+            "ohlcv": ohlcv,
+            "analysis": analysis_text,
+        }
 
         trend = indicators.get("trend", "unknown")
-        state["trace"].append(f"technical_agent → {trend} signal")
+        state["trace"].append(f"technical_agent → {trend} signal for {symbol}")
 
     except Exception as e:
-        state["technical_signals"] = {"error": str(e)[:200]}
+        state["technical_analysis"] = {
+            "signals": {},
+            "ohlcv": {},
+            "analysis": f"Technical agent error: {str(e)[:200]}",
+        }
         state["trace"].append(f"technical_agent → ERROR: {str(e)[:100]}")
 
     return state

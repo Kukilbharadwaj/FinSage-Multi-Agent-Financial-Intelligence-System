@@ -2,38 +2,33 @@
 # Handles insurance, loans, retirement, gold, crypto, and general financial literacy.
 # Uses RAG context for Indian-specific rules.
 # Model: GROQ_STANDARD (llama-3.3-70b-versatile)
+#
+# Stage 1 agent — no upstream dependencies.
+# Writes: state["general_finance_result"] as structured dict
+# Uses: RAG Agent (on-demand) for domain-specific rules
 
 from groq import Groq
 from config.settings import settings
 from config.models import GROQ_STANDARD
-from rag.knowledge_base import query_kb
-
-
-# Map intent to RAG search queries for focused retrieval
-INTENT_RAG_QUERIES = {
-    "insurance": "term insurance health insurance 80D premium ULIP claim settlement",
-    "loan": "home loan education loan EMI interest rate 80C 80E CIBIL section 24",
-    "retirement": "NPS pension retirement corpus SCSS senior citizen annuity 80CCD",
-    "gold": "sovereign gold bond SGB gold ETF digital gold capital gains",
-    "crypto": "cryptocurrency Bitcoin tax 30% VDA TDS crypto India",
-    "general": "financial planning investment India stock market basics",
-}
+from agents.rag_agent import retrieve_for_agent
 
 
 def run(state: dict) -> dict:
     """
     Handle insurance, loan, retirement, gold, crypto, and general finance queries.
     Uses RAG context for Indian-specific rules and guidelines.
+
+    Writes state["general_finance_result"] with structured output:
+        - answer: full LLM response text
+        - topic: the specific sub-topic (insurance/loan/retirement/gold/crypto/general)
     """
     try:
         intent = state.get("intent", "general")
         entities = state.get("entities", {})
         amount = entities.get("amount")
 
-        # Get relevant context from knowledge base
-        rag_query = INTENT_RAG_QUERIES.get(intent, INTENT_RAG_QUERIES["general"])
-        rag_context = query_kb(rag_query)
-        state["rag_context"] = rag_context
+        # Get relevant context from RAG Agent (on-demand)
+        rag_context = retrieve_for_agent(state, "general_finance")
 
         # Build intent-specific system prompt
         intent_prompts = {
@@ -80,18 +75,29 @@ Use ₹ symbol. Be specific with numbers. Show calculations where applicable."""
                 max_tokens=2000,
             )
 
-            state["general_finance_result"] = response.choices[0].message.content.strip()
+            answer_text = response.choices[0].message.content.strip()
+
+            state["general_finance_result"] = {
+                "answer": answer_text,
+                "topic": intent,
+            }
 
         except Exception as llm_error:
-            state["general_finance_result"] = (
-                f"Could not generate analysis: {str(llm_error)[:100]}. "
-                "Please consult a qualified financial advisor for personalized guidance."
-            )
+            state["general_finance_result"] = {
+                "answer": (
+                    f"Could not generate analysis: {str(llm_error)[:100]}. "
+                    "Please consult a qualified financial advisor for personalized guidance."
+                ),
+                "topic": intent,
+            }
 
         state["trace"].append(f"general_finance_agent → {intent} query answered")
 
     except Exception as e:
-        state["general_finance_result"] = f"General finance agent error: {str(e)[:200]}"
+        state["general_finance_result"] = {
+            "answer": f"General finance agent error: {str(e)[:200]}",
+            "topic": "general",
+        }
         state["trace"].append(f"general_finance_agent → ERROR: {str(e)[:100]}")
 
     return state

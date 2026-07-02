@@ -33,26 +33,42 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     """
     Process a financial query through the FinSage AI agent graph.
 
-    Runs intent detection, fetches data, and returns a recommendation.
+    Runs supervisor planning, staged agent execution, review, and synthesis.
     """
     if not request.query or not request.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     try:
-        # Build initial AgentState with all fields set to zero/None/empty values
+        # Build initial FinSageState with all fields set to zero/None/empty values
         initial_state = {
+            # Identity
             "user_id": request.user_id,
             "raw_query": request.query.strip(),
+
+            # Supervisor outputs (populated by supervisor_agent)
+            "goal": "",
             "intent": "",
             "entities": {},
-            "market_data": None,
-            "ohlcv": None,
-            "news": None,
+            "selected_agents": [],
+            "execution_plan": [],
+
+            # Communication bus: structured analysis dicts (populated by agents)
+            "salary_analysis": None,
+            "news_analysis": None,
+            "general_finance_result": None,
+            "tax_analysis": None,
+            "market_analysis": None,
+            "mf_analysis": None,
+            "trading_analysis_output": None,
+            "technical_analysis": None,
+
+            # RAG context (populated on-demand by agents via rag_agent)
             "rag_context": None,
-            "technical_signals": None,
-            "sentiment_score": None,
-            "salary_plan": None,
-            "tax_result": None,
+
+            # Review gate (populated by review_agent)
+            "review_output": None,
+
+            # Final output (populated by synthesis_agent)
             "recommendation": None,
             "confidence": None,
             "data_freshness": datetime.now(timezone.utc).isoformat(),
@@ -67,6 +83,11 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         confidence = result.get("confidence", 0)
         intent = result.get("intent", "general")
         trace = result.get("trace", [])
+
+        # Add execution plan to trace for transparency
+        plan = result.get("execution_plan", [])
+        if plan:
+            trace = [f"📋 Plan: {' → '.join(plan[:6])}"] + trace
 
         # Save to database
         try:
@@ -100,7 +121,8 @@ def health():
     """Health check endpoint."""
     return {
         "status": "ok",
-        "version": "0.1.0",
+        "version": "0.2.0",
+        "architecture": "supervisor-staged-review",
         "mcp_connected": has_live_session(),
         "mcp_tools": get_tools(),
     }

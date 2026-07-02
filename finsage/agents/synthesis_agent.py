@@ -1,6 +1,9 @@
 # agents/synthesis_agent.py
 # Combines all agent outputs into a final user answer.
 # Model: GROQ_STANDARD (llama-3.3-70b-versatile)
+#
+# Stage 5 (final) — reads ALL structured analysis dicts + review_output.
+# Writes: state["recommendation"], state["confidence"]
 
 from groq import Groq
 from config.settings import settings
@@ -11,90 +14,98 @@ def run(state: dict) -> dict:
     """
     Final agent: combines every available piece of information
     into one clear, formatted recommendation.
+
+    Reads from shared state:
+        - salary_analysis, tax_analysis, market_analysis, news_analysis,
+          mf_analysis, trading_analysis_output, technical_analysis,
+          general_finance_result (all structured dicts)
+        - review_output: issues, corrections, confidence_score
+        - execution_plan: the plan created by Supervisor
     """
     try:
         intent = state.get("intent", "general")
+        goal = state.get("goal", state.get("raw_query", ""))
 
-        # Collect all available outputs
+        # ── Collect all available outputs from communication bus ──
         context_parts = []
 
-        # Market data summary
-        market_data = state.get("market_data")
-        if market_data and isinstance(market_data, dict):
-            summary = market_data.get("summary", "")
+        # Salary analysis
+        salary = state.get("salary_analysis")
+        if salary and isinstance(salary, dict):
+            plan = salary.get("plan", "")
+            if plan:
+                context_parts.append(f"**Salary Analysis:**\n{plan[:800]}")
+
+        # Tax analysis
+        tax = state.get("tax_analysis")
+        if tax and isinstance(tax, dict):
+            tax_result = tax.get("tax_result", "")
+            if tax_result:
+                context_parts.append(f"**Tax Calculation:**\n{tax_result[:800]}")
+
+        # Market analysis
+        market = state.get("market_analysis")
+        if market and isinstance(market, dict):
+            summary = market.get("summary", "")
             if summary:
-                context_parts.append(f"**Market Data:**\n{summary}")
+                context_parts.append(f"**Market Analysis:**\n{summary[:600]}")
 
-        # Company profile
-        profile = state.get("company_profile")
-        if profile and isinstance(profile, dict) and "error" not in str(profile):
-            context_parts.append(
-                f"**Company Fundamentals:**\n"
-                f"- Name: {profile.get('name', 'N/A')} | Sector: {profile.get('sector', 'N/A')}\n"
-                f"- Market Cap: {profile.get('market_cap_formatted', 'N/A')}\n"
-                f"- P/E: {profile.get('pe_ratio', 'N/A')} | EPS: ₹{profile.get('eps', 'N/A')}\n"
-                f"- Dividend Yield: {profile.get('dividend_yield', 'N/A')}% | ROE: {profile.get('roe', 'N/A')}%\n"
-                f"- Debt/Equity: {profile.get('debt_to_equity', 'N/A')} | P/B: {profile.get('price_to_book', 'N/A')}\n"
-                f"- Profit Margin: {profile.get('profit_margin', 'N/A')}%"
-            )
-
-        # Technical signals
-        tech = state.get("technical_signals")
-        if tech and isinstance(tech, dict) and "error" not in tech:
-            analysis = tech.get("analysis", "")
-            if analysis:
-                context_parts.append(f"**Technical Analysis:**\n{analysis[:800]}")
-            else:
+            # Company profile
+            profile = market.get("company_profile", {})
+            if profile and isinstance(profile, dict) and profile.get("name"):
                 context_parts.append(
-                    f"**Technical Indicators:** Trend={tech.get('trend','N/A')}, "
-                    f"RSI={tech.get('rsi','N/A')}, EMA20={tech.get('ema20','N/A')}, "
-                    f"Support={tech.get('support','N/A')}, Resistance={tech.get('resistance','N/A')}"
+                    f"**Company Fundamentals:**\n"
+                    f"- Name: {profile.get('name', 'N/A')} | Sector: {profile.get('sector', 'N/A')}\n"
+                    f"- Market Cap: {profile.get('market_cap_formatted', 'N/A')}\n"
+                    f"- P/E: {profile.get('pe_ratio', 'N/A')} | EPS: ₹{profile.get('eps', 'N/A')}\n"
+                    f"- Dividend Yield: {profile.get('dividend_yield', 'N/A')}% | ROE: {profile.get('roe', 'N/A')}%\n"
+                    f"- Debt/Equity: {profile.get('debt_to_equity', 'N/A')} | P/B: {profile.get('price_to_book', 'N/A')}\n"
+                    f"- Profit Margin: {profile.get('profit_margin', 'N/A')}%"
                 )
 
-        # Sentiment
-        sentiment = state.get("sentiment_score")
-        if sentiment is not None:
-            mood = "positive" if sentiment > 0.2 else ("negative" if sentiment < -0.2 else "neutral")
-            context_parts.append(f"**News Sentiment:** {sentiment} ({mood})")
+        # News analysis
+        news = state.get("news_analysis")
+        if news and isinstance(news, dict):
+            score = news.get("sentiment_score", 0)
+            mood = news.get("market_mood", "neutral")
+            events = news.get("key_events", "")
+            if score != 0 or events:
+                context_parts.append(f"**News Sentiment:** {score} ({mood})\nKey Events: {events}")
+
+        # Technical analysis
+        tech = state.get("technical_analysis")
+        if tech and isinstance(tech, dict):
+            analysis = tech.get("analysis", "")
+            signals = tech.get("signals", {})
+            if analysis and "error" not in analysis.lower()[:20]:
+                context_parts.append(f"**Technical Analysis:**\n{analysis[:800]}")
+            elif signals:
+                context_parts.append(
+                    f"**Technical Indicators:** Trend={signals.get('trend','N/A')}, "
+                    f"RSI={signals.get('rsi','N/A')}, EMA20={signals.get('ema20','N/A')}, "
+                    f"Support={signals.get('support','N/A')}, Resistance={signals.get('resistance','N/A')}"
+                )
 
         # Trading analysis
-        trading = state.get("trading_analysis")
-        if trading:
-            context_parts.append(f"**Trading Analysis:**\n{trading[:1000]}")
+        trading = state.get("trading_analysis_output")
+        if trading and isinstance(trading, dict):
+            analysis = trading.get("analysis", "")
+            if analysis:
+                context_parts.append(f"**Trading Analysis:**\n{analysis[:1000]}")
 
-        # Options chain summary
-        options = state.get("options_chain")
-        if options and isinstance(options, dict) and "error" not in options:
-            context_parts.append(
-                f"**Options Data:** PCR={options.get('pcr', 'N/A')}, "
-                f"Max Pain=₹{options.get('max_pain', 'N/A')}, "
-                f"Call OI={options.get('total_call_oi', 'N/A')}, "
-                f"Put OI={options.get('total_put_oi', 'N/A')}"
-            )
-
-        # Mutual fund data
-        mf_data = state.get("mutual_fund_data")
-        if mf_data and isinstance(mf_data, dict):
-            mf_analysis = mf_data.get("analysis", "")
-            if mf_analysis:
-                context_parts.append(f"**Mutual Fund Analysis:**\n{mf_analysis[:1000]}")
-
-        # Tax result
-        tax_result = state.get("tax_result")
-        if tax_result:
-            context_parts.append(f"**Tax Calculation:**\n{tax_result[:800]}")
-
-        # Salary plan
-        salary_plan = state.get("salary_plan")
-        if salary_plan and isinstance(salary_plan, dict):
-            plan = salary_plan.get("plan", "")
-            if plan:
-                context_parts.append(f"**Salary Plan:**\n{plan[:800]}")
+        # Mutual fund analysis
+        mf = state.get("mf_analysis")
+        if mf and isinstance(mf, dict):
+            analysis = mf.get("analysis", "")
+            if analysis:
+                context_parts.append(f"**Mutual Fund Analysis:**\n{analysis[:1000]}")
 
         # General finance result
         general = state.get("general_finance_result")
-        if general:
-            context_parts.append(f"**Financial Analysis:**\n{general[:1000]}")
+        if general and isinstance(general, dict):
+            answer = general.get("answer", "")
+            if answer:
+                context_parts.append(f"**Financial Analysis ({general.get('topic', 'general')}):**\n{answer[:1000]}")
 
         # Data freshness
         freshness = state.get("data_freshness", "N/A")
@@ -102,7 +113,24 @@ def run(state: dict) -> dict:
 
         context_string = "\n\n".join(context_parts) if context_parts else "No agent data available."
 
-        # Determine sentiment guidance
+        # ── Read review output ──
+        review = state.get("review_output") or {}
+        review_issues = review.get("issues", [])
+        review_corrections = review.get("corrections", [])
+        review_confidence = review.get("confidence_score", 70)
+        review_approved = review.get("approved", True)
+
+        review_note = ""
+        if review_issues:
+            review_note = "\n\nReview Agent Notes:\n" + "\n".join(f"- {issue}" for issue in review_issues)
+        if review_corrections:
+            review_note += "\n\nCorrections to incorporate:\n" + "\n".join(f"- {c}" for c in review_corrections)
+        if not review_approved:
+            review_note += "\n\n⚠️ Review Agent flagged critical issues — reduce confidence and add caveats."
+
+        # ── Determine sentiment guidance ──
+        news_data = state.get("news_analysis") or {}
+        sentiment = news_data.get("sentiment_score")
         sentiment_note = ""
         if sentiment is not None:
             if sentiment > 0.2:
@@ -110,18 +138,7 @@ def run(state: dict) -> dict:
             elif sentiment < -0.2:
                 sentiment_note = "News sentiment is negative — warn the user about adverse news."
 
-        # Determine confidence adjustment
-        tech_trend = ""
-        if tech and isinstance(tech, dict):
-            tech_trend = tech.get("trend", "")
-        confidence_note = ""
-        if tech_trend == "bearish" and sentiment is not None and sentiment < -0.2:
-            confidence_note = (
-                "Both technical trend and news sentiment are negative. "
-                "Reduce confidence and add a strong risk warning."
-            )
-
-        # Choose system prompt based on intent
+        # ── Choose system prompt based on intent ──
         if intent == "trading":
             system_prompt = """You are a senior Indian trading expert giving a final, human-style analysis.
 Do not sound robotic and do not force a rigid BUY/SELL template when market is closed.
@@ -298,15 +315,23 @@ Use this structure:
 
 **Disclaimer:** Educational only, not personalized professional advice."""
 
+        # ── Build execution plan context ──
+        plan = state.get("execution_plan", [])
+        plan_text = ""
+        if plan:
+            plan_text = "\n\nExecution Plan followed:\n" + "\n".join(f"  {i+1}. {step}" for i, step in enumerate(plan))
+
         user_prompt = f"""User's question: "{state['raw_query']}"
+User's goal: {goal}
 Intent detected: {intent}
+{plan_text}
 
 Here is all the data collected by our analysis agents:
 
 {context_string}
 
 {sentiment_note}
-{confidence_note}
+{review_note}
 
 Generate the final recommendation using the intent-specific structure above. Keep it human, practical, and specific with numbers and ₹ amounts where available."""
 
@@ -338,6 +363,16 @@ Generate the final recommendation using the intent-specific structure above. Kee
                 state["confidence"] = 50
         except Exception:
             state["confidence"] = 50
+
+        # Adjust confidence based on Review Agent's assessment
+        if review_confidence is not None:
+            # Blend: 60% LLM confidence, 40% review confidence
+            llm_conf = state.get("confidence", 50)
+            blended = int(llm_conf * 0.6 + review_confidence * 0.4)
+            state["confidence"] = max(0, min(100, blended))
+
+        if not review_approved:
+            state["confidence"] = min(state.get("confidence", 50), 40)
 
         state["trace"].append("synthesis_agent → recommendation generated")
 

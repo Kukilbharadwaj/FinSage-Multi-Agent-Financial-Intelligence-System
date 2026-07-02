@@ -1,6 +1,9 @@
 # agents/news_agent.py
 # Fetches news headlines and scores sentiment.
 # Model: GROQ_FAST (llama-3.1-8b-instant) — fast sentiment scoring on many headlines
+#
+# Stage 1 agent — no upstream dependencies. Does NOT use RAG.
+# Writes: state["news_analysis"] (read by market_agent)
 
 import json
 from groq import Groq
@@ -13,7 +16,11 @@ def run(state: dict) -> dict:
     """
     Fetch news for the detected stock/index and score overall sentiment.
 
-    Stores articles in state["news"] and sentiment score in state["sentiment_score"].
+    Writes state["news_analysis"] with structured output:
+        - headlines: list of article dicts
+        - sentiment_score: -1.0 to 1.0
+        - key_events: one-line summary of market mood
+        - market_mood: "positive" | "negative" | "neutral"
     """
     try:
         entities = state.get("entities", {})
@@ -27,10 +34,14 @@ def run(state: dict) -> dict:
 
         # Fetch news articles
         articles = get_news(query, limit=10)
-        state["news"] = articles
 
         if not articles:
-            state["sentiment_score"] = 0.0
+            state["news_analysis"] = {
+                "headlines": [],
+                "sentiment_score": 0.0,
+                "key_events": "No recent news found",
+                "market_mood": "neutral",
+            }
             state["trace"].append("news_agent → no articles found, sentiment = 0.0")
             return state
 
@@ -53,7 +64,7 @@ Score the overall sentiment from -1.0 (very negative/bearish) to 1.0 (very posit
 Consider: market crash fears = negative, rally/gains = positive, mixed news = near 0.
 
 Respond ONLY with valid JSON in this exact format, nothing else:
-{{"score": 0.0, "summary": "one line summary of overall market mood"}}"""
+{{"score": 0.0, "summary": "one line summary of overall market mood", "mood": "positive|negative|neutral", "key_events": "most important event from headlines"}}"""
 
             response = client.chat.completions.create(
                 model=GROQ_FAST,
@@ -62,7 +73,7 @@ Respond ONLY with valid JSON in this exact format, nothing else:
                     {"role": "user", "content": sentiment_prompt},
                 ],
                 temperature=0.0,
-                max_tokens=150,
+                max_tokens=200,
             )
 
             raw_response = response.choices[0].message.content.strip()
@@ -77,19 +88,38 @@ Respond ONLY with valid JSON in this exact format, nothing else:
 
             result = json.loads(json_str)
             score = float(result.get("score", 0.0))
+            score = max(-1.0, min(1.0, score))  # clamp
 
-            # Clamp score to valid range
-            score = max(-1.0, min(1.0, score))
-            state["sentiment_score"] = round(score, 2)
+            mood = result.get("mood", "neutral")
+            if mood not in ("positive", "negative", "neutral"):
+                mood = "positive" if score > 0.2 else ("negative" if score < -0.2 else "neutral")
+
+            state["news_analysis"] = {
+                "headlines": articles,
+                "sentiment_score": round(score, 2),
+                "key_events": result.get("key_events", result.get("summary", "")),
+                "market_mood": mood,
+            }
 
         except (json.JSONDecodeError, Exception):
-            state["sentiment_score"] = 0.0
+            state["news_analysis"] = {
+                "headlines": articles,
+                "sentiment_score": 0.0,
+                "key_events": "Sentiment analysis unavailable",
+                "market_mood": "neutral",
+            }
 
-        state["trace"].append(f"news_agent → sentiment {state['sentiment_score']}")
+        score = state["news_analysis"]["sentiment_score"]
+        mood = state["news_analysis"]["market_mood"]
+        state["trace"].append(f"news_agent → sentiment {score} ({mood})")
 
     except Exception as e:
-        state["news"] = []
-        state["sentiment_score"] = 0.0
+        state["news_analysis"] = {
+            "headlines": [],
+            "sentiment_score": 0.0,
+            "key_events": f"Error: {str(e)[:80]}",
+            "market_mood": "neutral",
+        }
         state["trace"].append(f"news_agent → ERROR: {str(e)[:100]}")
 
     return state

@@ -2,22 +2,30 @@
 # Intraday and Options/F&O trading analysis agent.
 # Fetches live intraday data, options chain, and provides trading signals.
 # Model: GROQ_REASONING (qwen/qwen3-32b) — step-by-step trading strategy
+#
+# Stage 3 agent — reads market_analysis from shared state.
+# Writes: state["trading_analysis_output"]
+# Uses: RAG Agent (on-demand) for trading rules
 
 from groq import Groq
 from config.settings import settings
 from config.models import GROQ_REASONING
 from mcp_bridge import call_mcp_tool, is_mcp_enabled
 from tools.yahoo_tool import get_intraday_data, get_options_chain, get_indian_market_status
-from tools.technical_tool import calculate_indicators
-from rag.knowledge_base import query_kb
+from agents.rag_agent import retrieve_for_agent
 
 
 def run(state: dict) -> dict:
     """
     Analyze intraday and F&O trading opportunities using live data.
 
-    Fetches intraday candles, options chain data, and uses RAG context
-    for trading rules. Produces actionable trading signals.
+    Reads from shared state:
+        - market_analysis: summary, sentiment, volatility (if available)
+
+    Writes state["trading_analysis_output"] with structured output:
+        - analysis: full LLM trading analysis text
+        - market_status: market open/closed status dict
+        - options_data: options chain dict (if applicable)
     """
     try:
         entities = state.get("entities", {})
@@ -26,9 +34,14 @@ def run(state: dict) -> dict:
         # Determine symbol
         symbol = entities.get("stock") or entities.get("index") or "NIFTY 50"
 
-        # Get trading rules from RAG
-        rag_context = query_kb("intraday trading options F&O strategies risk management stop-loss")
-        state["rag_context"] = rag_context
+        # Get trading rules from RAG Agent (on-demand)
+        rag_context = retrieve_for_agent(state, "trading")
+
+        # ── Read upstream: market_analysis from shared state ──
+        market_info = state.get("market_analysis") or {}
+        market_summary = market_info.get("summary", "")
+        market_sentiment = market_info.get("sentiment", "neutral")
+        market_volatility = market_info.get("volatility", "medium")
 
         # Fetch intraday data
         intraday = {}
@@ -37,9 +50,8 @@ def run(state: dict) -> dict:
                 intraday = call_mcp_tool("intraday_data", {"symbol": symbol})
             else:
                 intraday = get_intraday_data(symbol)
-            state["intraday_data"] = intraday
         except Exception as e:
-            state["intraday_data"] = {"error": str(e)[:100]}
+            intraday = {"error": str(e)[:100]}
 
         # Fetch options chain if query is about options/F&O
         options_data = {}
@@ -55,9 +67,8 @@ def run(state: dict) -> dict:
                     options_data = call_mcp_tool("options_chain", {"symbol": symbol})
                 else:
                     options_data = get_options_chain(symbol)
-                state["options_chain"] = options_data
             except Exception as e:
-                state["options_chain"] = {"error": str(e)[:100]}
+                options_data = {"error": str(e)[:100]}
 
         market_status = (intraday or {}).get("market_status") or get_indian_market_status()
         is_market_open = bool(market_status.get("is_open"))
@@ -95,6 +106,13 @@ def run(state: dict) -> dict:
     - Next Open: {market_status.get('next_open_ist', 'N/A')}
     - Today Close: {market_status.get('today_close_ist', 'N/A')}
     - Note: {market_status.get('reason', 'N/A')}""")
+
+        # Add upstream market context
+        if market_summary:
+            data_parts.append(f"""MARKET ANALYSIS CONTEXT (from Market Agent):
+- Summary: {market_summary[:300]}
+- Sentiment: {market_sentiment}
+- Volatility: {market_volatility}""")
 
         if options_data and "error" not in options_data:
             # Format top calls and puts
@@ -152,6 +170,8 @@ Top Puts (by volume):
 
 Be specific with prices in ₹. This is for educational purposes only."""
 
+        analysis_text = ""
+
         try:
             client = Groq(api_key=settings.GROQ_API_KEY)
 
@@ -166,21 +186,33 @@ Be specific with prices in ₹. This is for educational purposes only."""
                 reasoning_format="hidden",
             )
 
-            state["trading_analysis"] = response.choices[0].message.content.strip()
+            analysis_text = response.choices[0].message.content.strip()
 
         except Exception as llm_error:
-            state["trading_analysis"] = (
+            analysis_text = (
                 f"Trading analysis could not be completed: {str(llm_error)[:100]}. "
                 "Please use a professional trading terminal for real-time analysis."
             )
 
+        # ── Write structured output to communication bus ──
+        state["trading_analysis_output"] = {
+            "analysis": analysis_text,
+            "market_status": market_status,
+            "options_data": options_data if options_data and "error" not in options_data else None,
+        }
+
         state["trace"].append(
             f"trading_agent → {symbol} "
             f"{'options + intraday' if is_options_query else 'intraday'} analysis ({market_status.get('status', 'unknown')})"
+            + (f" (market: {market_sentiment})" if market_summary else "")
         )
 
     except Exception as e:
-        state["trading_analysis"] = f"Trading agent error: {str(e)[:200]}"
+        state["trading_analysis_output"] = {
+            "analysis": f"Trading agent error: {str(e)[:200]}",
+            "market_status": {},
+            "options_data": None,
+        }
         state["trace"].append(f"trading_agent → ERROR: {str(e)[:100]}")
 
     return state

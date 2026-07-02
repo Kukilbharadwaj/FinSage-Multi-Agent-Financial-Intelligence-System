@@ -1,47 +1,64 @@
 # agents/state.py
-# AgentState TypedDict — the single shared data structure that flows through
-# every node in the LangGraph graph. Every field must have a type annotation.
+# FinSageState TypedDict — the shared data structure that flows through
+# every node in the LangGraph graph.
+#
+# This state acts as a COMMUNICATION BUS:
+#   - Each agent writes to its own *_analysis dict
+#   - Downstream agents READ from upstream *_analysis dicts
+#   - No direct agent-to-agent calls — all communication via state
+#
+# Dependency map (read direction):
+#   salary_analysis  ← read by: tax_agent, mutual_fund_agent
+#   tax_analysis     ← read by: mutual_fund_agent
+#   news_analysis    ← read by: market_agent
+#   market_analysis  ← read by: trading_agent, mutual_fund_agent
 
 from typing import TypedDict, Optional
 
 
-class AgentState(TypedDict):
+class FinSageState(TypedDict):
     """Shared state flowing through all LangGraph nodes."""
 
-    # User and query identification
-    user_id: str                           # identifies the user session
-    raw_query: str                         # the original user question unchanged
+    # ── Identity ──────────────────────────────────────────────
+    user_id: str                            # identifies the user session
+    raw_query: str                          # the original user question unchanged
 
-    # Intent classification results
-    intent: str                            # one of: salary, stock, index, tax, trading, mutual_fund, insurance, loan, retirement, gold, crypto, general
-    entities: dict                         # extracted: {stock, amount, index, fund_name} — may be empty
+    # ── Supervisor outputs ────────────────────────────────────
+    goal: str                               # what the user wants (human-readable)
+    intent: str                             # primary intent for backward compat with API
+    entities: dict                          # extracted: {stock, amount, index, fund_name}
+    selected_agents: list                   # e.g. ["salary", "tax", "mutual_fund", "market"]
+    execution_plan: list                    # e.g. ["Analyze salary", "Calculate tax", ...]
 
-    # Market data
-    market_data: Optional[dict]            # price, change, high, low, 52w high/low, source
-    company_profile: Optional[dict]        # fundamental data: P/E, EPS, market cap, sector, etc.
-    ohlcv: Optional[dict]                  # close, high, low, volume, dates lists for charts
-    intraday_data: Optional[dict]          # 5-min candle data for intraday analysis
+    # ── Communication bus: structured analysis dicts ──────────
+    #
+    # Stage 1 outputs (no dependencies):
+    salary_analysis: Optional[dict]         # {annual_salary, monthly_salary, monthly_savings,
+                                            #  investable_income, risk_profile, plan}
+    news_analysis: Optional[dict]           # {headlines, sentiment_score, key_events,
+                                            #  market_mood}
+    general_finance_result: Optional[dict]  # {answer, topic}
 
-    # Options / F&O data
-    options_chain: Optional[dict]          # calls, puts, PCR, max pain, OI data
+    # Stage 2 outputs (read Stage 1):
+    tax_analysis: Optional[dict]            # {tax_result, remaining_80c,
+                                            #  tax_saving_opportunities, effective_rate}
+    market_analysis: Optional[dict]         # {market_data, company_profile, sentiment,
+                                            #  volatility, timing_recommendation, summary}
 
-    # Mutual fund data
-    mutual_fund_data: Optional[dict]       # NAV, returns, fund house, category
+    # Stage 3 outputs (read Stage 1+2):
+    mf_analysis: Optional[dict]             # {mutual_fund_data, sip_recommendation, analysis}
+    trading_analysis_output: Optional[dict] # {analysis, market_status, options_data}
+    technical_analysis: Optional[dict]      # {signals, ohlcv, analysis}
 
-    # News and sentiment
-    news: Optional[list]                   # list of {title, source, link} dicts
-    rag_context: Optional[str]            # retrieved text chunks from FAISS index
+    # ── RAG context (populated on-demand by agents via rag_agent) ──
+    rag_context: Optional[dict]             # {contexts: {tax: ..., salary: ...},
+                                            #  sources: [...], combined: "..."}
 
-    # Analysis results
-    technical_signals: Optional[dict]      # ema20, ema50, rsi, macd, support, resistance, trend
-    sentiment_score: Optional[float]       # -1.0 (very negative) to 1.0 (very positive)
-    salary_plan: Optional[dict]            # {plan: str} with monthly breakdown
-    tax_result: Optional[str]              # tax calculation narrative from qwq reasoning
-    trading_analysis: Optional[str]        # intraday/options trading analysis
-    general_finance_result: Optional[str]  # insurance, loan, retirement, gold, crypto answers
+    # ── Review gate ───────────────────────────────────────────
+    review_output: Optional[dict]           # {issues, corrections, confidence_score, approved}
 
-    # Final output
-    recommendation: Optional[str]          # the final formatted answer shown to user
-    confidence: Optional[int]              # 0-100 confidence estimate
-    data_freshness: str                    # ISO timestamp of when market data was fetched
-    trace: list                            # list of strings showing which agents ran
+    # ── Final output ──────────────────────────────────────────
+    recommendation: Optional[str]           # the final formatted answer shown to user
+    confidence: Optional[int]               # 0-100 confidence estimate
+    data_freshness: str                     # ISO timestamp of when data was fetched
+    trace: list                             # list of strings showing which agents ran
