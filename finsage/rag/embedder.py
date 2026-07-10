@@ -10,8 +10,8 @@ import os
 # Create a cache directory locally if it doesn't exist
 cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "model_cache")
 
-# Load the model once — runs on CPU, no GPU needed
-_model = SentenceTransformer("all-MiniLM-L6-v2", cache_folder=cache_dir)
+# Load the model once — explicitly on CPU to avoid CUDA init issues on ZeroGPU
+_model = SentenceTransformer("all-MiniLM-L6-v2", cache_folder=cache_dir, device="cpu")
 
 
 def embed(texts: list) -> np.ndarray:

@@ -1,3 +1,12 @@
+# ZeroGPU on HuggingFace Spaces requires `spaces` to be imported BEFORE any
+# CUDA-related package (torch, sentence-transformers, etc.).  The `spaces`
+# package is pre-installed on Spaces but won't exist locally, so we guard it.
+try:
+    import spaces  # must be first — before torch / sentence-transformers
+    _HAS_SPACES = True
+except ImportError:
+    _HAS_SPACES = False
+
 import os
 import multiprocessing
 import threading
@@ -6,6 +15,16 @@ import requests
 import uvicorn
 
 from mcp_server import mcp
+
+
+# ZeroGPU requires at least one @spaces.GPU-decorated function to be detected
+# at startup.  FinSage doesn't actually need GPU (it uses Groq API), so this
+# is a lightweight no-op placeholder.
+if _HAS_SPACES:
+    @spaces.GPU
+    def _zerogpu_placeholder():
+        """No-op function required by ZeroGPU startup detection."""
+        pass
 
 
 # Hugging Face Spaces runs a single entry file (app.py).
