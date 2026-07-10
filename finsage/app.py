@@ -18,7 +18,7 @@ _BACKEND_STARTED = threading.Event()
 
 def _run_mcp_server() -> None:
     mcp.settings.host = os.getenv("MCP_HOST", "0.0.0.0")
-    mcp.settings.port = int(os.getenv("MCP_PORT", "7861"))
+    mcp.settings.port = int(os.getenv("MCP_PORT", "7862"))
 
     transport = os.getenv("MCP_TRANSPORT", "sse").strip().lower()
     if transport == "http":
@@ -103,7 +103,7 @@ def wait_for_backend(url: str, timeout: int = 25) -> None:
 def build_app():
     backend_host = os.getenv("BACKEND_HOST", "127.0.0.1")
     backend_port = os.getenv("BACKEND_PORT", "8000")
-    mcp_port = os.getenv("MCP_PORT", "7861")
+    mcp_port = os.getenv("MCP_PORT", "7862")
     transport = os.getenv("MCP_TRANSPORT", "sse").strip().lower()
 
     default_url = f"http://127.0.0.1:{mcp_port}/mcp" if transport == "http" else f"http://127.0.0.1:{mcp_port}/sse"
@@ -135,13 +135,13 @@ def build_app():
     wait_for_backend(backend_health_url, timeout=backend_timeout)
 
     # Import after env/setup so mcp_client picks the correct MCP_SERVER_URL.
-    from frontend.app import create_ui
+    from frontend.app import create_ui, CUSTOM_CSS
 
-    return create_ui()
+    return create_ui(), CUSTOM_CSS
 
 
 # Exported for Spaces runtime discovery.
-demo = build_app()
+demo, custom_css = build_app()
 
 
 
@@ -150,4 +150,5 @@ demo.launch(
         server_port=int(os.getenv("PORT", "7860")),
         share=False,
         show_error=True,
+        css=custom_css,
     )

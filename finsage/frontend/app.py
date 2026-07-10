@@ -244,7 +244,7 @@ CUSTOM_CSS = """
 
 
 def create_ui() -> gr.Blocks:
-    with gr.Blocks(title="FinSage AI", css=CUSTOM_CSS) as demo:
+    with gr.Blocks(title="FinSage AI") as demo:
         state = gr.State(init_state())
 
         gr.Markdown("## 📈 FinSage AI — Indian Financial Assistant", elem_classes=["main-title"])
@@ -309,4 +309,4 @@ demo = create_ui()
 
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=int(os.getenv("FINSAGE_UI_PORT", "7860")))
+    demo.launch(server_name="0.0.0.0", server_port=int(os.getenv("FINSAGE_UI_PORT", "7860")), css=CUSTOM_CSS)
