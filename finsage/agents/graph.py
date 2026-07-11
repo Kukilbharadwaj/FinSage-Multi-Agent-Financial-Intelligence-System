@@ -1,18 +1,22 @@
 # agents/graph.py
 # LangGraph StateGraph definition — the core orchestration pipeline.
 #
-# Architecture:
-#   supervisor → stage_1 → stage_2 → stage_3 → review → synthesis → END
+# Architecture (v3 — with NeMo Guardrails):
+#   input_guardrail → [conditional] → supervisor → stage_1 → stage_2 → stage_3
+#                          ↓ (blocked)       → review → synthesis → output_guardrail → END
+#                     reject_response → END
 #
 # Each stage is a dispatcher that only runs agents selected by the Supervisor
 # AND assigned to that stage. Unselected stages are no-op passthroughs.
 #
 # Stage assignment (dependency-aware):
+#   Stage 0 (always):     input_guardrail (NeMo Guardrails)
 #   Stage 1 (independent):  salary, news, general_finance
 #   Stage 2 (reads Stage 1): tax, market
 #   Stage 3 (reads Stage 1+2): mutual_fund, trading, technical
 #   Stage 4 (always): review
 #   Stage 5 (always): synthesis
+#   Stage 6 (always): output_guardrail (NeMo Guardrails)
 
 from langgraph.graph import StateGraph, END
 from agents.state import FinSageState
@@ -27,6 +31,8 @@ import agents.trading_agent as trading_agent
 import agents.technical_agent as technical_agent
 import agents.review_agent as review_agent
 import agents.synthesis_agent as synthesis_agent
+import agents.input_guardrail_agent as input_guardrail_agent
+import agents.output_guardrail_agent as output_guardrail_agent
 
 
 # ── Agent registry: maps agent names to their run() functions ──
@@ -93,30 +99,83 @@ def run_stage_3(state: dict) -> dict:
     return _run_stage(state, 3)
 
 
+def reject_response(state: dict) -> dict:
+    """
+    Reject node: formats the guardrail rejection as the final recommendation.
+    Called when input_guardrail blocks the query.
+    """
+    reject_reason = state.get("input_reject_reason", "")
+
+    if reject_reason:
+        state["recommendation"] = reject_reason
+    else:
+        state["recommendation"] = (
+            "I'm sorry, I can only help with Indian financial topics like stocks, "
+            "mutual funds, tax planning, salary management, insurance, loans, "
+            "retirement, trading, gold, and crypto. Please ask me a finance-related question!"
+        )
+
+    state["confidence"] = 0
+    state["intent"] = "blocked"
+    state["trace"].append("reject_response → query blocked by input guardrail")
+    return state
+
+
+def route_after_guardrail(state: dict) -> str:
+    """
+    Conditional router: check if input guardrail passed or blocked.
+    Returns the name of the next node to route to.
+    """
+    if state.get("input_safe", True):
+        return "supervisor"
+    else:
+        return "reject_response"
+
+
 def build_graph() -> StateGraph:
-    """Build and compile the FinSage AI agent graph."""
+    """Build and compile the FinSage AI agent graph with NeMo Guardrails."""
 
     graph = StateGraph(FinSageState)
 
     # Add all nodes
+    graph.add_node("input_guardrail", input_guardrail_agent.run)
     graph.add_node("supervisor", supervisor_agent.run)
     graph.add_node("stage_1", run_stage_1)
     graph.add_node("stage_2", run_stage_2)
     graph.add_node("stage_3", run_stage_3)
     graph.add_node("review", review_agent.run)
     graph.add_node("synthesis", synthesis_agent.run)
+    graph.add_node("output_guardrail", output_guardrail_agent.run)
+    graph.add_node("reject_response", reject_response)
 
-    # Linear pipeline: supervisor → stage_1 → stage_2 → stage_3 → review → synthesis → END
-    graph.set_entry_point("supervisor")
+    # Entry point: input guardrail first
+    graph.set_entry_point("input_guardrail")
+
+    # Conditional edge: route based on guardrail result
+    graph.add_conditional_edges(
+        "input_guardrail",
+        route_after_guardrail,
+        {
+            "supervisor": "supervisor",
+            "reject_response": "reject_response",
+        },
+    )
+
+    # Main pipeline: supervisor → stages → review → synthesis → output_guardrail → END
     graph.add_edge("supervisor", "stage_1")
     graph.add_edge("stage_1", "stage_2")
     graph.add_edge("stage_2", "stage_3")
     graph.add_edge("stage_3", "review")
     graph.add_edge("review", "synthesis")
-    graph.add_edge("synthesis", END)
+    graph.add_edge("synthesis", "output_guardrail")
+    graph.add_edge("output_guardrail", END)
+
+    # Reject path: reject_response → END
+    graph.add_edge("reject_response", END)
 
     return graph.compile()
 
 
 # Compiled graph — import this from API routes and test scripts
 app_graph = build_graph()
+

@@ -68,6 +68,11 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
             # Review gate (populated by review_agent)
             "review_output": None,
 
+            # Guardrail gate (populated by input/output guardrail agents)
+            "input_safe": None,
+            "input_reject_reason": None,
+            "output_safe": None,
+
             # Final output (populated by synthesis_agent)
             "recommendation": None,
             "confidence": None,

@@ -57,6 +57,11 @@ class FinSageState(TypedDict):
     # ── Review gate ───────────────────────────────────────────
     review_output: Optional[dict]           # {issues, corrections, confidence_score, approved}
 
+    # ── Guardrail gate ────────────────────────────────────────
+    input_safe: Optional[bool]              # True if input passed NeMo guardrails
+    input_reject_reason: Optional[str]      # reason if input was blocked (empty if safe)
+    output_safe: Optional[bool]             # True if output passed NeMo guardrails
+
     # ── Final output ──────────────────────────────────────────
     recommendation: Optional[str]           # the final formatted answer shown to user
     confidence: Optional[int]               # 0-100 confidence estimate

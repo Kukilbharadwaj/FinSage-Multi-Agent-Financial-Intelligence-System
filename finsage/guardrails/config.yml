@@ -1,0 +1,37 @@
+# guardrails/config.yml
+# NVIDIA NeMo Guardrails configuration for FinSage AI.
+#
+# Uses Groq via its OpenAI-compatible endpoint for fast guardrail checks.
+# NeMo's default framework reads:
+#   - base_url from parameters (overrides the default OpenAI URL)
+#   - api_key from OPENAI_API_KEY env var (set to GROQ_API_KEY by guardrail agents)
+
+models:
+  - type: main
+    engine: openai
+    model: llama-3.1-8b-instant
+    parameters:
+      base_url: "https://api.groq.com/openai/v1"
+      temperature: 0.0
+      max_tokens: 50
+
+# Instruction for the guardrail LLM context
+instructions:
+  - type: general
+    content: |
+      You are FinSage AI, an Indian financial intelligence assistant.
+      You ONLY answer questions about Indian personal finance, stocks, mutual funds,
+      tax, salary planning, insurance, loans, retirement, trading, gold, crypto,
+      and related financial topics.
+      You do NOT answer questions about non-financial topics.
+      You never guarantee investment returns.
+      You always include a disclaimer that this is educational and not SEBI-registered advice.
+
+# Enable input and output self-check rails
+rails:
+  input:
+    flows:
+      - self check input
+  output:
+    flows:
+      - self check output
