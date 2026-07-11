@@ -1,8 +1,8 @@
 # FinSage AI: Multi-Agent Indian Financial Intelligence System
 
-FinSage AI is an advanced multi-agent financial assistant for Indian users, built on a **Supervisor-planned, dependency-staged, review-gated architecture**. It answers practical questions on stocks, indices, mutual funds, tax, salary planning, insurance, loans, retirement, and trading using LangGraph orchestration, live market tools, and retrieval-augmented context.
+FinSage AI is an advanced multi-agent financial assistant for Indian users, built on a **Supervisor-planned, dependency-staged, guardrail-gated, review-gated architecture**. It answers practical questions on stocks, indices, mutual funds, tax, salary planning, insurance, loans, retirement, and trading using LangGraph orchestration, live market tools, and retrieval-augmented context.
 
-The system uses a **Supervisor Agent** that dynamically selects which specialist agents to invoke, a **shared state communication bus** for inter-agent data flow, and a **Review Agent** that validates all outputs before final synthesis.
+The system uses a **Supervisor Agent** that dynamically selects which specialist agents to invoke, a **shared state communication bus** for inter-agent data flow, **NVIDIA NeMo Guardrails** for input/output safety, and a **Review Agent** that validates all outputs before final synthesis.
 
 The project supports two execution styles:
 
@@ -14,7 +14,8 @@ Important: this project is for educational and informational use only. It is not
 ## Features
 
 - **Supervisor Agent** with LLM-based planning and dynamic agent selection (replaces keyword-based intent routing)
-- **Dependency-aware 5-stage execution pipeline**: Stage 1 (independent) → Stage 2 (reads Stage 1) → Stage 3 (reads Stage 1+2) → Review → Synthesis
+- **NVIDIA NeMo Guardrails** for input safety (blocks off-topic, prompt injection, toxic content) and output compliance (ensures disclaimers, blocks guaranteed return claims)
+- **Dependency-aware 7-stage execution pipeline**: Input Guardrail → Supervisor → Stage 1 → Stage 2 → Stage 3 → Review → Synthesis → Output Guardrail
 - **Shared state communication bus**: agents exchange structured data via `FinSageState` — no direct agent-to-agent calls
 - **Review/Critic Agent** validates all outputs for contradictions, missing data, and plan completion before synthesis
 - **On-demand RAG service** with domain-specific query expansion (Tax, Salary, MF, Market agents call RAG when needed)
@@ -29,16 +30,20 @@ Important: this project is for educational and informational use only. It is not
 
 ```mermaid
 graph TD
-    User[👤 User] --> UI[🖥️ Gradio UI]
-    UI --> API[⚡ FastAPI Backend]
-    API --> Supervisor[🧠 Supervisor Agent]
+    User["👤 User"] --> UI["🖥️ Gradio UI"]
+    UI --> API["⚡ FastAPI Backend"]
+    API --> InputGuard["🛡️ Input Guardrail — NeMo"]
+
+    InputGuard -->|"input_safe=true"| Supervisor["🧠 Supervisor Agent"]
+    InputGuard -->|"input_safe=false"| Reject["🚫 Reject Response"]
+    Reject --> Response["✅ Final Response"]
 
     Supervisor -->|"selected_agents + execution_plan"| Dispatcher{Stage Dispatcher}
 
     subgraph "Stage 1 — Independent"
-        Salary[💰 Salary Agent]
-        News[📰 News Agent]
-        GenFin[📋 General Finance]
+        Salary["💰 Salary Agent"]
+        News["📰 News Agent"]
+        GenFin["📋 General Finance"]
     end
 
     subgraph "Stage 2 — Reads Stage 1"
@@ -56,12 +61,13 @@ graph TD
     Salary & News & GenFin --> Tax & Market
     Tax & Market --> MF & Trading & Technical
 
-    MF & Trading & Technical --> Review[🔍 Review Agent]
-    Review --> Synthesis[🧩 Synthesis Agent]
-    Synthesis --> Response[✅ Final Recommendation]
+    MF & Trading & Technical --> Review["🔍 Review Agent"]
+    Review --> Synthesis["🧩 Synthesis Agent"]
+    Synthesis --> OutputGuard["🛡️ Output Guardrail — NeMo"]
+    OutputGuard --> Response
 
     %% RAG ON-DEMAND
-    RAG[📚 RAG Agent — On-Demand Service]
+    RAG["📚 RAG Agent — On-Demand Service"]
     Salary -.->|calls| RAG
     Tax -.->|calls| RAG
     MF -.->|calls| RAG
@@ -70,9 +76,9 @@ graph TD
     %% MCP TOOLS
     subgraph MCP_Tools
         direction TB
-        MCPClient[🔌 MCP Client]
-        MCPServer[🧠 MCP Server]
-        Tools[🛠️ Market APIs and Data]
+        MCPClient["🔌 MCP Client"]
+        MCPServer["🧠 MCP Server"]
+        Tools["🛠️ Market APIs and Data"]
     end
 
     Market --> MCPClient
@@ -82,7 +88,7 @@ graph TD
     MCPServer --> Tools
 
     %% STORAGE
-    API --> DB[(🗄️ SQLite)]
+    API --> DB[("🗄️ SQLite")]
 ```
 
 ## Agent Communication (Shared State Bus)
@@ -91,11 +97,13 @@ Agents communicate exclusively through structured dicts in `FinSageState`. No di
 
 | State Key | Written By | Read By |
 |-----------|-----------|--------|
+| `input_safe` | Input Guardrail | Graph Router |
 | `salary_analysis` | Salary Agent | Tax Agent, MF Agent |
 | `tax_analysis` | Tax Agent | MF Agent |
 | `news_analysis` | News Agent | Market Agent |
 | `market_analysis` | Market Agent | Trading Agent, MF Agent |
 | `review_output` | Review Agent | Synthesis Agent |
+| `output_safe` | Output Guardrail | — |
 
 ### Execution Example
 
@@ -103,12 +111,14 @@ Query: `"I earn 12 LPA. How can I reduce taxes and invest wisely?"`
 
 | Stage | Agents Run | Data Flow |
 |-------|-----------|----------|
+| Input Guardrail | NeMo Rails | checks query → `input_safe=true` |
 | Supervisor | — | `selected_agents=["salary","tax","mutual_fund","market"]` |
 | Stage 1 | Salary | writes `salary_analysis` |
 | Stage 2 | Tax, Market | Tax reads `salary_analysis` |
 | Stage 3 | MF | reads `salary_analysis` + `tax_analysis` + `market_analysis` |
 | Review | Review | validates all outputs, scores confidence |
 | Synthesis | Synthesis | combines everything into final recommendation |
+| Output Guardrail | NeMo Rails | ensures disclaimer, checks compliance |
 
 ## Tech Stack
 
@@ -117,6 +127,7 @@ Query: `"I earn 12 LPA. How can I reduce taxes and invest wisely?"`
 - Gradio
 - LangGraph + LangChain
 - Groq API
+- **NVIDIA NeMo Guardrails** (input/output safety rails)
 - MCP (SSE)
 - FAISS + sentence-transformers
 - SQLite + SQLAlchemy
@@ -135,10 +146,12 @@ finsage/
 
     agents/
         state.py            # FinSageState TypedDict (shared communication bus)
-        graph.py            # LangGraph StateGraph (supervisor → stages → review → synthesis)
-        supervisor_agent.py # [NEW] LLM-based planner and dynamic agent selector
-        rag_agent.py        # [NEW] On-demand RAG service with query expansion
-        review_agent.py     # [NEW] Critic that validates outputs before synthesis
+        graph.py            # LangGraph StateGraph (guardrail → supervisor → stages → review → synthesis → guardrail)
+        input_guardrail_agent.py  # NeMo input safety gate (blocks off-topic, injection, toxic)
+        output_guardrail_agent.py # NeMo output compliance gate (disclaimers, no guarantees)
+        supervisor_agent.py # LLM-based planner and dynamic agent selector
+        rag_agent.py        # On-demand RAG service with query expansion
+        review_agent.py     # Critic that validates outputs before synthesis
         salary_agent.py     # Stage 1: writes salary_analysis
         news_agent.py       # Stage 1: writes news_analysis
         general_finance_agent.py  # Stage 1: writes general_finance_result
@@ -150,13 +163,19 @@ finsage/
         synthesis_agent.py  # Final: reads all outputs + review_output
         intent_agent.py     # [LEGACY] kept for reference, not in graph
 
+    guardrails/             # NVIDIA NeMo Guardrails configuration
+        config.yml          # Model config (Groq via OpenAI-compatible endpoint)
+        config.py           # Environment setup for Groq API key
+        rails.co            # Colang topical + safety rail definitions
+        prompts.yml         # Self-check input/output prompt templates
+
     api/                    # FastAPI routes (/chat, /health, /history)
     config/                 # Settings and model config (Groq models)
     db/                     # SQLite database setup and CRUD
     frontend/               # Gradio UI implementation
     rag/                    # FAISS vector store + sentence-transformers embedder
     tools/                  # Financial tool integrations (NSE, Yahoo, MF, News, TA)
-    scripts/                # Utility scripts (ingest_docs, test_query, verify_imports)
+    scripts/                # Utility scripts (ingest_docs, test_query, test_guardrails, verify_imports)
 ```
 
 ## API Contract
@@ -368,16 +387,21 @@ Fix:
 - main.py remains the standalone backend entrypoint.
 - intent_agent.py is kept as legacy reference but is no longer wired into the graph.
 
-## Architecture v2 Summary
+## Architecture v3 Summary
 
-The system was refactored from a simple `Intent → Route → Synthesize` pipeline to:
+The system was refactored from a simple `Intent → Route → Synthesize` pipeline to a guardrail-gated architecture:
 
 ```
-Supervisor → Stage 1 (independent) → Stage 2 (reads Stage 1) → Stage 3 (reads Stage 1+2) → Review → Synthesis
+Input Guardrail → [conditional] → Supervisor → Stage 1 → Stage 2 → Stage 3 → Review → Synthesis → Output Guardrail
+                       ↓ (blocked)
+                  Reject Response → END
 ```
 
 Key design decisions:
 
+- **NeMo Guardrails**: NVIDIA NeMo Guardrails with Colang topical rails + self-check prompts for input/output safety
+- **Conditional routing**: Blocked queries skip the entire pipeline via LangGraph conditional edges, saving API tokens
+- **Fail-open design**: If guardrails fail to load, the system continues working (allows queries, ensures disclaimers)
 - **Supervisor over Intent**: LLM-based multi-agent selection instead of keyword routing
 - **Staged execution**: Dependency-aware ordering ensures upstream data exists before downstream agents run
 - **On-demand RAG**: Not a graph node — agents call `rag_agent.retrieve_for_agent()` only when they need knowledge context
