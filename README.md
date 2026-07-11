@@ -19,6 +19,7 @@ Important: this project is for educational and informational use only. It is not
 - **Shared state communication bus**: agents exchange structured data via `FinSageState` — no direct agent-to-agent calls
 - **Review/Critic Agent** validates all outputs for contradictions, missing data, and plan completion before synthesis
 - **On-demand RAG service** with domain-specific query expansion (Tax, Salary, MF, Market agents call RAG when needed)
+- **Langfuse LLM Telemetry** integration for monitoring token usage, latency, tool calls, and LangGraph execution traces
 - **Confidence blending**: 60% LLM self-assessment + 40% Review Agent score
 - Multi-agent orchestration with LangGraph
 - FastAPI backend with structured API responses
@@ -128,6 +129,7 @@ Query: `"I earn 12 LPA. How can I reduce taxes and invest wisely?"`
 - LangGraph + LangChain
 - Groq API
 - **NVIDIA NeMo Guardrails** (input/output safety rails)
+- **Langfuse** (LLM Telemetry and Observability)
 - MCP (SSE)
 - FAISS + sentence-transformers
 - SQLite + SQLAlchemy
@@ -240,6 +242,11 @@ Create .env in the project root:
 
 ```env
 GROQ_API_KEY=gsk_your_key_here
+
+# Optional: Langfuse Telemetry keys
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
 ### 5. Build RAG index (first run only)
