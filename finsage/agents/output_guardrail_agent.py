@@ -111,7 +111,16 @@ def _ensure_disclaimer(text: str) -> str:
     else:
         return text + SEBI_DISCLAIMER
 
+try:
+    from langfuse.decorators import observe
+except ImportError:
+    # Dummy decorator if langfuse is not installed
+    def observe(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
 
+@observe(as_type="generation")
 def run(state: dict) -> dict:
     """
     Output Guardrail: check the final recommendation against NeMo Guardrails.

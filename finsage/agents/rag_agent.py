@@ -29,6 +29,16 @@ _DOMAIN_QUERIES = {
 }
 
 
+try:
+    from langfuse.decorators import observe
+except ImportError:
+    # Dummy decorator if langfuse is not installed
+    def observe(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+@observe()
 def retrieve_for_agent(state: dict, agent_name: str, extra_query: str = "") -> str:
     """
     On-demand RAG retrieval for a specific agent.

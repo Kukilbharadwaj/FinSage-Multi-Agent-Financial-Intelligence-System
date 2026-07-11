@@ -69,6 +69,16 @@ async def _call_mcp_tool_async(tool_name: str, arguments: Dict[str, Any]) -> Any
     return await asyncio.wait_for(_invoke(), timeout=timeout)
 
 
+try:
+    from langfuse.decorators import observe
+except ImportError:
+    # Dummy decorator if langfuse is not installed
+    def observe(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+@observe()
 def call_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Any:
     """Synchronous wrapper for MCP tool calls used by sync agents."""
     # Prefer backend-managed MCP client session started by main.py.

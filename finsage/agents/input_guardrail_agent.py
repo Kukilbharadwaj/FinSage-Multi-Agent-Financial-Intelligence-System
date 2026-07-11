@@ -81,7 +81,16 @@ def _run_async(coro):
     except RuntimeError:
         return asyncio.run(coro)
 
+try:
+    from langfuse.decorators import observe
+except ImportError:
+    # Dummy decorator if langfuse is not installed
+    def observe(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
 
+@observe(as_type="generation")
 def run(state: dict) -> dict:
     """
     Input Guardrail: check user query against NeMo Guardrails.

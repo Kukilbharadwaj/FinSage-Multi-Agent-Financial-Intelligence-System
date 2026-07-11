@@ -80,8 +80,16 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
             "trace": [],
         }
 
+        # Set up Langfuse telemetry callback
+        try:
+            from langfuse.callback import CallbackHandler
+            langfuse_handler = CallbackHandler()
+            callbacks = [langfuse_handler]
+        except ImportError:
+            callbacks = []
+
         # Run the full agent graph
-        result = app_graph.invoke(initial_state)
+        result = app_graph.invoke(initial_state, config={"callbacks": callbacks})
 
         # Extract results
         recommendation = result.get("recommendation", "No recommendation generated.")
