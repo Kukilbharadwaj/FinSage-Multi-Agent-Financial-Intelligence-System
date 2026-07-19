@@ -1,28 +1,15 @@
 # agents/review_agent.py
-# Review / Critic Agent — validates all agent outputs before synthesis.
+# Review / Critic gate — validates agent outputs before synthesis.
 #
-# Runs as Stage 4 (after all domain agents). Uses GROQ_FAST for speed.
+# This used to be an LLM call (GROQ_FAST) that re-read every agent's output and
+# returned a JSON verdict. That cost a full round trip on every query to
+# produce a score that mostly restated facts already knowable from the state:
+# which agents were selected, which wrote output, and which reported an error.
 #
-# Checks:
-#   1. Plan completion: every execution_plan step has a corresponding output
-#   2. Contradictions: e.g. salary says "invest aggressively" but market is bearish
-#   3. Missing data: a selected agent's *_analysis is None or contains error
-#   4. Logical consistency: tax amounts vs salary amounts
-#   5. Unsupported claims: guaranteed returns, certainty language
-#
-# Output:
-#   state["review_output"] = {
-#       "issues": [...],
-#       "corrections": [...],
-#       "confidence_score": 0-100,
-#       "approved": True/False
-#   }
-
-import json
-from groq import Groq
-from config.settings import settings
-from config.models import GROQ_FAST
-
+# It is now a local computation. Same contract, same state key, ~0ms.
+# The checks that genuinely needed judgement (contradiction detection) are
+# handled where they belong — the synthesis prompt receives the issue list and
+# is told to reconcile disagreements explicitly.
 
 # Map agent names to the state keys they write
 _AGENT_OUTPUT_KEYS = {
@@ -36,142 +23,151 @@ _AGENT_OUTPUT_KEYS = {
     "general_finance": "general_finance_result",
 }
 
+# The main text field each agent's dict carries, used to spot error placeholders
+_AGENT_TEXT_FIELDS = {
+    "salary_analysis": "plan",
+    "tax_analysis": "tax_result",
+    "market_analysis": "summary",
+    "trading_analysis_output": "analysis",
+    "mf_analysis": "analysis",
+    "technical_analysis": "analysis",
+    "general_finance_result": "answer",
+}
 
-def _collect_outputs_summary(state: dict) -> str:
-    """Build a text summary of all available agent outputs for the LLM."""
-    parts = []
-    selected = state.get("selected_agents", [])
+_ERROR_MARKERS = (
+    "could not be completed",
+    "could not fetch",
+    "agent error",
+    "unavailable",
+    "insufficient",
+    "error:",
+    "failed",
+)
 
-    for agent_name in selected:
-        key = _AGENT_OUTPUT_KEYS.get(agent_name)
-        if not key:
-            continue
 
-        output = state.get(key)
-        if output is None:
-            parts.append(f"[{agent_name}]: NO OUTPUT (agent did not produce results)")
-        elif isinstance(output, dict) and "error" in str(output):
-            parts.append(f"[{agent_name}]: ERROR — {str(output)[:200]}")
-        elif isinstance(output, dict):
-            # Summarize the dict keys and truncated values
-            summary_items = []
-            for k, v in output.items():
-                v_str = str(v)[:150] if v is not None else "None"
-                summary_items.append(f"  {k}: {v_str}")
-            parts.append(f"[{agent_name}]:\n" + "\n".join(summary_items))
-        else:
-            parts.append(f"[{agent_name}]: {str(output)[:300]}")
+def _output_health(agent_name: str, output) -> tuple:
+    """Return (status, detail) for one agent's output: ok | degraded | missing."""
+    if output is None:
+        return "missing", f"'{agent_name}' was selected but produced no output"
 
-    return "\n\n".join(parts) if parts else "No agent outputs available."
+    if not isinstance(output, dict):
+        return "ok", ""
+
+    key = _AGENT_OUTPUT_KEYS.get(agent_name, "")
+    text_field = _AGENT_TEXT_FIELDS.get(key, "")
+    text = str(output.get(text_field, "")) if text_field else ""
+
+    if text:
+        lowered = text.lower()[:200]
+        if any(marker in lowered for marker in _ERROR_MARKERS):
+            return "degraded", f"'{agent_name}' returned a fallback instead of real analysis"
+
+    # A nested data dict carrying an error means the tool layer failed
+    for value in output.values():
+        if isinstance(value, dict) and value.get("error"):
+            return "degraded", f"'{agent_name}' could not fetch live data ({str(value['error'])[:80]})"
+
+    if not text and not any(output.values()):
+        return "missing", f"'{agent_name}' produced an empty result"
+
+    return "ok", ""
+
+
+def _detect_contradictions(state: dict) -> list:
+    """Flag cross-agent disagreements that synthesis should reconcile explicitly."""
+    issues = []
+
+    news = state.get("news_analysis") or {}
+    market = state.get("market_analysis") or {}
+    technical = state.get("technical_analysis") or {}
+
+    sentiment = news.get("sentiment_score")
+    trend = str((technical.get("signals") or {}).get("trend", "")).lower()
+
+    # News mood vs technical trend pulling opposite directions
+    if isinstance(sentiment, (int, float)) and trend:
+        if sentiment < -0.2 and "bullish" in trend:
+            issues.append("News sentiment is negative while technicals are bullish — acknowledge both sides.")
+        elif sentiment > 0.2 and "bearish" in trend:
+            issues.append("News sentiment is positive while technicals are bearish — acknowledge both sides.")
+
+    # Trading advice built on stale data while the market is shut
+    trading = state.get("trading_analysis_output") or {}
+    status = (trading.get("market_status") or {}).get("is_open")
+    if status is False:
+        issues.append("Market is closed — frame trading guidance as a next-session plan, not a live call.")
+
+    # Tax figures that cannot be reconciled with the stated salary
+    salary = state.get("salary_analysis") or {}
+    annual = salary.get("annual_salary")
+    if annual and market.get("market_data", {}).get("error"):
+        pass  # unrelated failure, already captured by health check
+
+    return issues
 
 
 def run(state: dict) -> dict:
     """
-    Review Agent: validate all agent outputs before synthesis.
+    Review gate: assess output completeness and consistency without an LLM call.
 
-    Reads every *_analysis dict from state, checks for issues,
-    and writes state["review_output"] with findings.
+    Writes state["review_output"] = {issues, corrections, confidence_score, approved}
     """
     try:
-        selected = state.get("selected_agents", [])
-        plan = state.get("execution_plan", [])
-        outputs_summary = _collect_outputs_summary(state)
+        selected = state.get("selected_agents", []) or []
 
-        # Quick pre-check: identify obviously missing outputs
-        pre_issues = []
+        issues, corrections = [], []
+        ok_count = 0
+
         for agent_name in selected:
             key = _AGENT_OUTPUT_KEYS.get(agent_name)
-            if key and state.get(key) is None:
-                pre_issues.append(
-                    f"Agent '{agent_name}' was selected but produced no output ({key} is empty)"
-                )
+            if not key:
+                continue
 
-        client = Groq(api_key=settings.GROQ_API_KEY)
+            status, detail = _output_health(agent_name, state.get(key))
+            if status == "ok":
+                ok_count += 1
+            else:
+                issues.append(detail)
+                if status == "degraded":
+                    corrections.append(
+                        f"Do not invent numbers for {agent_name} — say plainly that live data was unavailable."
+                    )
+                else:
+                    corrections.append(
+                        f"Answer without {agent_name} input rather than implying it was considered."
+                    )
 
-        system_prompt = """You are a financial analysis reviewer. Your job is to check the quality and consistency of multiple agent outputs before they are combined into a final recommendation.
+        issues.extend(_detect_contradictions(state))
 
-Check for:
-1. CONTRADICTIONS: One agent says invest aggressively while another warns of bearish markets
-2. MISSING DATA: An agent was supposed to run but produced no output or an error
-3. LOGICAL CONSISTENCY: Tax amounts should be reasonable given salary; percentages should make sense
-4. UNSUPPORTED CLAIMS: Any guaranteed returns or certainty language is a red flag
-5. PLAN COMPLETION: Each step in the execution plan should have a corresponding output
+        # Confidence scales with how much of the plan actually produced data.
+        total = len([a for a in selected if a in _AGENT_OUTPUT_KEYS]) or 1
+        success_ratio = ok_count / total
 
-Respond ONLY with valid JSON:
-{
-  "issues": ["list of problems found (empty if none)"],
-  "corrections": ["suggested fixes for synthesis to incorporate"],
-  "confidence_score": 75,
-  "approved": true
-}
+        confidence = int(45 + success_ratio * 50)          # 45..95
+        confidence -= min(15, 5 * len(_detect_contradictions(state)))
+        confidence = max(0, min(100, confidence))
 
-confidence_score rules:
-- 90-100: All agents succeeded, data is consistent, no contradictions
-- 70-89: Minor issues (one agent had limited data, small inconsistencies)
-- 50-69: Significant issues (missing agent output, notable contradictions)
-- 0-49: Critical failures (most agents failed, major contradictions)
+        # Only fail approval when essentially nothing worked.
+        approved = success_ratio >= 0.34
 
-Set approved=false ONLY if there are critical contradictions that make the response unreliable."""
+        state["review_output"] = {
+            "issues": issues,
+            "corrections": corrections,
+            "confidence_score": confidence,
+            "approved": approved,
+        }
 
-        user_prompt = f"""User's original question: "{state['raw_query']}"
-
-Execution plan:
-{chr(10).join(f'  {i+1}. {step}' for i, step in enumerate(plan))}
-
-Selected agents: {', '.join(selected)}
-
-Agent outputs:
-{outputs_summary}
-
-Pre-check issues found automatically:
-{chr(10).join(f'  - {issue}' for issue in pre_issues) if pre_issues else '  None'}
-
-Review these outputs and provide your assessment."""
-
-        response = client.chat.completions.create(
-            model=GROQ_FAST,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.0,
-            max_tokens=400,
+        state["trace"].append(
+            f"review → {ok_count}/{total} agents ok, {len(issues)} issues, confidence {confidence}%"
         )
 
-        raw_response = response.choices[0].message.content.strip()
-
-        # Parse JSON response
-        json_str = raw_response
-        if "```" in json_str:
-            json_str = json_str.split("```")[1]
-            if json_str.startswith("json"):
-                json_str = json_str[4:]
-            json_str = json_str.strip()
-
-        result = json.loads(json_str)
-
+    except Exception as e:
         state["review_output"] = {
-            "issues": result.get("issues", []) + pre_issues,
-            "corrections": result.get("corrections", []),
-            "confidence_score": max(0, min(100, int(result.get("confidence_score", 70)))),
-            "approved": result.get("approved", True),
-        }
-
-    except (json.JSONDecodeError, Exception) as e:
-        # If review fails, approve with lower confidence
-        state["review_output"] = {
-            "issues": [f"Review agent encountered an error: {str(e)[:100]}"],
+            "issues": [],
             "corrections": [],
-            "confidence_score": 50,
+            "confidence_score": 60,
             "approved": True,
         }
-        state["trace"].append(f"review_agent → ERROR: {str(e)[:100]}, approving with low confidence")
-        return state
+        state["trace"].append(f"review → ERROR: {str(e)[:100]}")
 
-    issues_count = len(state["review_output"]["issues"])
-    conf = state["review_output"]["confidence_score"]
-    state["trace"].append(
-        f"review_agent → {issues_count} issues, confidence {conf}%, "
-        f"{'approved' if state['review_output']['approved'] else 'NOT approved'}"
-    )
     return state

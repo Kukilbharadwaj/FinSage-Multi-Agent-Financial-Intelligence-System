@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinSage AI — Indian Financial Intelligence</title>
+    <meta name="description" content="FinSage AI is an advanced multi-agent financial assistant for Indian users. Get real-time analysis on stocks, mutual funds, tax planning, and more.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📈</text></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar Backdrop (mobile) -->
+        <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar()"></div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-section">
+                    <div class="logo-icon">📈</div>
+                    <span class="logo-text">FinSage AI</span>
+                </div>
+                <div class="logo-subtitle">Multi-Agent Financial Intelligence</div>
+            </div>
+
+            <div class="sidebar-content">
+                <div class="section-title">💡 Example Questions</div>
+                <div id="exampleQueries">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="session-info">
+                    <div class="session-label">Session Usage</div>
+                    <div class="session-bar">
+                        <div class="session-bar-fill" id="sessionBarFill" style="width: 0%"></div>
+                    </div>
+                    <div class="session-count" id="sessionCount">0 / 5 queries used</div>
+                </div>
+                <div style="margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);">
+                    <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                        <span class="status-dot" id="mcpStatusDot"></span>
+                        <span style="font-size:11px; color:var(--text-muted);" id="mcpStatusText">Checking MCP...</span>
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted);" id="mcpToolsText"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Area -->
+        <main class="main-area">
+            <!-- Top Bar -->
+            <div class="top-bar">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <button class="hamburger-btn" onclick="toggleSidebar()" aria-label="Toggle sidebar">☰</button>
+                    <span class="top-bar-title">Financial Assistant</span>
+                </div>
+                <div class="top-bar-status">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span class="status-text" id="statusText">Online</span>
+                </div>
+            </div>
+
+            <!-- Chat Container -->
+            <div class="chat-container" id="chatContainer">
+                <!-- Welcome Screen -->
+                <div class="welcome-screen" id="welcomeScreen">
+                    <div class="welcome-icon">📈</div>
+                    <h1 class="welcome-title">Welcome to FinSage AI</h1>
+                    <p class="welcome-subtitle">
+                        Your intelligent financial assistant powered by multi-agent AI. 
+                        Ask about stocks, mutual funds, taxes, salary planning, and more.
+                    </p>
+                    <div class="welcome-chips" id="welcomeChips">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <div class="input-wrapper" id="inputWrapper">
+                    <textarea 
+                        id="queryInput" 
+                        rows="1" 
+                        placeholder="Ask any financial question..." 
+                        onkeydown="handleKeyDown(event)"
+                        oninput="autoResize(this)"
+                    ></textarea>
+                    <button class="input-btn send-btn" id="sendBtn" onclick="sendMessage()" title="Send Message">
+                        ➤
+                    </button>
+                </div>
+            </div>
+
+            <div class="disclaimer">
+                <p class="disclaimer-text">
+                    ⚠️ FinSage AI provides financial information for educational purposes only. 
+                    Not SEBI-registered investment advice. Always consult a qualified financial advisor.
+                </p>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

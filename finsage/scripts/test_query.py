@@ -1,89 +1,145 @@
 # scripts/test_query.py
-# Test all 5 intent paths directly through the LangGraph graph.
-# Run this WITHOUT starting the server.
-# Usage: python scripts/test_query.py
+# Run representative queries straight through the LangGraph graph.
+# No server needed.
+#
+# Usage:
+#   python scripts/test_query.py                    # run the standard set
+#   python scripts/test_query.py "your question"    # run one ad-hoc query
 
 import os
 import sys
+import time
 from datetime import datetime, timezone
+
 from dotenv import load_dotenv
 
-# Load environment variables first
 load_dotenv()
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Windows consoles default to cp1252 and raise on the rupee sign / arrows.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 from agents.graph import app_graph
+from mcp_bridge import startup_mcp_runtime
+from observability import get_callbacks, init_langfuse
+from rag.knowledge_base import warmup as warm_rag
 
 
-def run_query(query_text: str) -> dict:
-    """Build a clean initial state and run the full agent graph."""
-    initial_state = {
+def build_state(query_text: str) -> dict:
+    """Build a clean FinSageState. Keys must match agents/state.py."""
+    return {
+        # Identity
         "user_id": "test_user",
         "raw_query": query_text,
+        # Supervisor outputs
+        "goal": "",
         "intent": "",
         "entities": {},
-        "market_data": None,
-        "ohlcv": None,
-        "news": None,
+        "selected_agents": [],
+        "execution_plan": [],
+        # Communication bus
+        "salary_analysis": None,
+        "news_analysis": None,
+        "general_finance_result": None,
+        "tax_analysis": None,
+        "market_analysis": None,
+        "mf_analysis": None,
+        "trading_analysis_output": None,
+        "technical_analysis": None,
+        # RAG + review
         "rag_context": None,
-        "technical_signals": None,
-        "sentiment_score": None,
-        "salary_plan": None,
-        "tax_result": None,
+        "review_output": None,
+        # Guardrail gate
+        "input_safe": None,
+        "guardrail_action": None,
+        "input_reject_reason": None,
+        "output_safe": None,
+        # Final output
         "recommendation": None,
         "confidence": None,
         "data_freshness": datetime.now(timezone.utc).isoformat(),
         "trace": [],
     }
-    return app_graph.invoke(initial_state)
 
 
-def main():
-    """Test all 5 query paths."""
-    test_queries = [
-        ("SALARY PATH", "My monthly salary is ₹20,000. How should I manage and save?"),
-        ("STOCK PATH", "Should I buy Reliance Industries stock right now?"),
-        ("INDEX PATH", "Nifty 50 is at 22,400. Should I buy or wait?"),
-        ("TAX PATH", "I sold TCS after 8 months with ₹50,000 profit. What is my tax?"),
-        ("GENERAL PATH", "What is the current Indian market situation?"),
-    ]
+def run_query(query_text: str) -> tuple:
+    """Run one query through the graph, returning (result, elapsed_seconds)."""
+    started = time.time()
+    result = app_graph.invoke(
+        build_state(query_text),
+        config={"callbacks": get_callbacks()},
+    )
+    return result, time.time() - started
 
-    print("=" * 70)
-    print("  FinSage AI — Full Agent Graph Test")
-    print("=" * 70)
 
-    for label, query in test_queries:
-        print(f"\n{'─' * 70}")
-        print(f"  TEST: {label}")
+DEFAULT_QUERIES = [
+    ("SMALL TALK", "hi, what can you do?"),
+    ("BLOCKED", "write me a poem about the sea"),
+    ("SALARY", "My monthly salary is 20,000. How should I manage and save?"),
+    ("STOCK", "Should I buy Reliance Industries stock right now?"),
+    ("INDEX", "What is Nifty 50 at today, and should I buy or wait?"),
+    ("TAX", "I sold TCS after 8 months with 50,000 profit. What is my tax?"),
+    ("TRADING", "NIFTY option chain - any trade setup for this expiry?"),
+    ("MUTUAL FUND", "Best ELSS fund for 80C tax saving with SIP"),
+]
+
+
+def main() -> int:
+    # Warm the shared services so the first query is not penalised.
+    startup_mcp_runtime()
+    warm_rag()
+    init_langfuse()
+
+    queries = (
+        [("CUSTOM", " ".join(sys.argv[1:]))] if len(sys.argv) > 1 else DEFAULT_QUERIES
+    )
+
+    print("=" * 74)
+    print("  FinSage AI - Full Agent Graph Test")
+    print("=" * 74)
+
+    failures = 0
+
+    for label, query in queries:
+        print(f"\n{'-' * 74}")
+        print(f"  TEST:  {label}")
         print(f"  QUERY: {query}")
-        print(f"{'─' * 70}")
+        print(f"{'-' * 74}")
 
         try:
-            result = run_query(query)
+            result, elapsed = run_query(query)
 
-            print(f"  Intent: {result.get('intent', 'N/A')}")
-            print(f"  Confidence: {result.get('confidence', 'N/A')}%")
-            print(f"  Trace: {' → '.join(result.get('trace', []))}")
+            print(f"  {elapsed:.2f}s | intent={result.get('intent', 'N/A')} "
+                  f"| confidence={result.get('confidence', 'N/A')} "
+                  f"| agents={result.get('selected_agents', [])}")
+
+            for step in result.get("trace", []):
+                print(f"    - {step[:100]}")
+
+            recommendation = result.get("recommendation") or "No recommendation"
             print()
+            for line in recommendation[:600].splitlines():
+                print(f"    {line}")
+            if len(recommendation) > 600:
+                print("    ...")
 
-            recommendation = result.get("recommendation", "No recommendation")
-            # Show first 500 characters
-            if len(recommendation) > 500:
-                print(f"  Recommendation (first 500 chars):\n  {recommendation[:500]}...")
-            else:
-                print(f"  Recommendation:\n  {recommendation}")
+            if not result.get("recommendation"):
+                failures += 1
+                print("  [FAIL] no recommendation produced")
 
         except Exception as e:
-            print(f"  ❌ ERROR: {str(e)[:300]}")
+            failures += 1
+            print(f"  [ERROR] {str(e)[:300]}")
 
-        print()
-
-    print("=" * 70)
-    print("  All tests complete!")
-    print("=" * 70)
+    print("\n" + "=" * 74)
+    print("  All tests complete" if failures == 0 else f"  {failures} test(s) had problems")
+    print("=" * 74)
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

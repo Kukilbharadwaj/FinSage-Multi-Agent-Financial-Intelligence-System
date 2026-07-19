@@ -1,26 +1,47 @@
+# Core LLM + orchestration
 groq>=0.9.0
 langgraph>=0.2.0
 langchain>=0.3.0
 langchain-community>=0.3.0
+langchain-groq>=0.2.0
+
+# MCP — fastmcp supplies the in-memory transport used by mcp_bridge.py
+fastmcp>=2.0.0
+mcp>=1.2.0
+
+# Observability
+langfuse>=3.0.0
+
+# Market data
 yfinance>=0.2.40
+mftool>=2.8.0
 feedparser>=6.0.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 pandas>=2.1.0
 numpy>=1.24.0
 ta>=0.11.0
-sentence-transformers>=3.0.0
-faiss-cpu>=1.7.4
+
+# Required for NSE: Akamai fingerprints the TLS handshake and rejects plain
+# `requests` with 403. curl_cffi presents a real Chrome fingerprint.
+curl_cffi>=0.7.0
+
+# RAG — embeddings come from the Hugging Face Inference API (no local model),
+# vectors are stored in Pinecone (no local index).
+pinecone>=5.0.0
+
+# Web layer
 fastapi>=0.115.0
 uvicorn>=0.30.0
 pydantic>=2.5.0
 pydantic-settings>=2.0.0
 sqlalchemy>=2.0.0
-gradio>=5.0.0
 python-dotenv>=1.0.0
 httpx>=0.27.0
-mftool>=2.8.0
-mcp[cli]>=1.2.0
-nemoguardrails>=0.10.0
-langchain-groq>=0.2.0
-langfuse>=2.0.0
+PyYAML>=6.0.0
+
+# Removed in v4:
+#   nemoguardrails  -> replaced by local checks in agents/guardrail.py
+#   faster-whisper  -> voice mode removed
+#   kokoro          -> voice mode removed
+#   soundfile       -> voice mode removed

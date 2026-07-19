@@ -1,420 +1,574 @@
-# FinSage AI: Multi-Agent Indian Financial Intelligence System
+# FinSage AI — Multi-Agent Indian Financial Intelligence
 
-FinSage AI is an advanced multi-agent financial assistant for Indian users, built on a **Supervisor-planned, dependency-staged, guardrail-gated, review-gated architecture**. It answers practical questions on stocks, indices, mutual funds, tax, salary planning, insurance, loans, retirement, and trading using LangGraph orchestration, live market tools, and retrieval-augmented context.
+FinSage AI is a multi-agent financial assistant for Indian users. It answers practical
+questions on stocks, indices, options and F&O, mutual funds, income tax and GST, salary
+planning, insurance, loans and retirement — using LangGraph orchestration, live exchange
+data, and retrieval-augmented context.
 
-The system uses a **Supervisor Agent** that dynamically selects which specialist agents to invoke, a **shared state communication bus** for inter-agent data flow, **NVIDIA NeMo Guardrails** for input/output safety, and a **Review Agent** that validates all outputs before final synthesis.
+A **Supervisor Agent** decides which specialists to run, agents exchange data through a
+**shared state bus**, a **Review gate** validates the results, and a **Synthesis Agent**
+turns everything into one human answer.
 
-The project supports two execution styles:
+**One process, one command:**
 
-1. Local multi-process mode: run FastAPI, MCP server, and Gradio separately.
-2. Hugging Face Spaces single-entry mode: run app.py, which orchestrates all required services.
+```bash
+python main.py
+```
 
-Important: this project is for educational and informational use only. It is not SEBI-registered investment advice.
+MCP tools run in-memory inside the backend — there is no second server to start.
+
+> Educational and informational use only. FinSage is not a SEBI-registered investment advisor.
+
+---
 
 ## Features
 
-- **Supervisor Agent** with LLM-based planning and dynamic agent selection (replaces keyword-based intent routing)
-- **NVIDIA NeMo Guardrails** for input safety (blocks off-topic, prompt injection, toxic content) and output compliance (ensures disclaimers, blocks guaranteed return claims)
-- **Dependency-aware 7-stage execution pipeline**: Input Guardrail → Supervisor → Stage 1 → Stage 2 → Stage 3 → Review → Synthesis → Output Guardrail
-- **Shared state communication bus**: agents exchange structured data via `FinSageState` — no direct agent-to-agent calls
-- **Review/Critic Agent** validates all outputs for contradictions, missing data, and plan completion before synthesis
-- **On-demand RAG service** with domain-specific query expansion (Tax, Salary, MF, Market agents call RAG when needed)
-- **Langfuse LLM Telemetry** integration for monitoring token usage, latency, tool calls, and LangGraph execution traces
-- **Confidence blending**: 60% LLM self-assessment + 40% Review Agent score
-- Multi-agent orchestration with LangGraph
-- FastAPI backend with structured API responses
-- Gradio chat UI with example prompts, confidence score, trace, and recent history
-- MCP server integration for tool invocation
-- Local persistence for query logs via SQLite
+| | |
+|---|---|
+| **Supervisor planning** | An LLM picks the agents per query instead of keyword routing |
+| **Parallel stages** | Independent agents inside a stage run concurrently |
+| **In-memory MCP** | FastMCP in-process: ~2ms per tool call, no port, no SSE hop |
+| **Live NSE data** | Exchange-native quotes for indices *and* equities, plus real option chains (OI, IV, PCR, max pain) |
+| **Minimal guardrails** | Local string checks; small talk is answered, not refused |
+| **Pinecone + HF embeddings** | Managed vector store, API embeddings, no local model or index |
+| **Langfuse telemetry** | Full LangGraph traces, token usage, latency |
+| **Review gate** | Local validation of completeness and cross-agent contradictions |
+| **Single service** | FastAPI serves both the REST API and the chat UI |
 
-## High-Level Architecture
+---
+
+## Architecture
 
 ```mermaid
 graph TD
-    User["👤 User"] --> UI["🖥️ Gradio UI"]
+    User["👤 User"] --> UI["🖥️ Web UI"]
     UI --> API["⚡ FastAPI Backend"]
-    API --> InputGuard["🛡️ Input Guardrail — NeMo"]
+    API --> Guard["🛡️ Input Guardrail — local"]
 
-    InputGuard -->|"input_safe=true"| Supervisor["🧠 Supervisor Agent"]
-    InputGuard -->|"input_safe=false"| Reject["🚫 Reject Response"]
-    Reject --> Response["✅ Final Response"]
+    Guard -->|"allow"| Supervisor["🧠 Supervisor Agent"]
+    Guard -->|"smalltalk / block"| Direct["💬 Direct Reply"]
+    Direct --> Response["✅ Final Response"]
 
     Supervisor -->|"selected_agents + execution_plan"| Dispatcher{Stage Dispatcher}
 
-    subgraph "Stage 1 — Independent"
-        Salary["💰 Salary Agent"]
-        News["📰 News Agent"]
+    subgraph S1["Stage 1 — independent (parallel)"]
+        Salary["💰 Salary"]
+        News["📰 News"]
         GenFin["📋 General Finance"]
     end
 
-    subgraph "Stage 2 — Reads Stage 1"
-        Tax["🧾 Tax Agent ← salary_analysis"]
-        Market["📈 Market Agent ← news_analysis"]
+    subgraph S2["Stage 2 — reads Stage 1 (parallel)"]
+        Tax["🧾 Tax"]
+        Market["📈 Market"]
     end
 
-    subgraph "Stage 3 — Reads Stage 1+2"
-        MF["📊 MF Agent ← salary+tax+market"]
-        Trading["📉 Trading Agent ← market"]
-        Technical["📐 Technical Agent"]
+    subgraph S3["Stage 3 — reads Stage 1+2 (parallel)"]
+        MF["📊 Mutual Fund"]
+        Trading["📉 Trading"]
+        Technical["📐 Technical"]
     end
 
     Dispatcher --> Salary & News & GenFin
     Salary & News & GenFin --> Tax & Market
     Tax & Market --> MF & Trading & Technical
 
-    MF & Trading & Technical --> Review["🔍 Review Agent"]
+    MF & Trading & Technical --> Review["🔍 Review Gate — local"]
     Review --> Synthesis["🧩 Synthesis Agent"]
-    Synthesis --> OutputGuard["🛡️ Output Guardrail — NeMo"]
-    OutputGuard --> Response
+    Synthesis --> OutGuard["🛡️ Output Guardrail — local"]
+    OutGuard --> Response
 
-    %% RAG ON-DEMAND
-    RAG["📚 RAG Agent — On-Demand Service"]
-    Salary -.->|calls| RAG
-    Tax -.->|calls| RAG
-    MF -.->|calls| RAG
-    Market -.->|"when needed"| RAG
-
-    %% MCP TOOLS
-    subgraph MCP_Tools
-        direction TB
-        MCPClient["🔌 MCP Client"]
-        MCPServer["🧠 MCP Server"]
-        Tools["🛠️ Market APIs and Data"]
+    subgraph RAGSYS["RAG — on demand"]
+        Embed["🔤 HF Inference API"]
+        Pine[("🌲 Pinecone")]
     end
 
-    Market --> MCPClient
-    MF --> MCPClient
-    Trading --> MCPClient
-    MCPClient --> MCPServer
-    MCPServer --> Tools
+    Salary & Tax & MF & Trading & Market & GenFin -.->|retrieve| Embed
+    Embed --> Pine
 
-    %% STORAGE
+    subgraph MCPSYS["MCP Tools — in-process"]
+        Bridge["🔌 mcp_bridge"]
+        Server["🧠 FastMCP server"]
+        NSE["🏛️ NSE"]
+        YF["📊 Yahoo Finance"]
+        Other["🛠️ AMFI / News"]
+    end
+
+    Market & MF & Trading & Technical --> Bridge
+    Bridge --> Server
+    Server --> NSE & YF & Other
+
     API --> DB[("🗄️ SQLite")]
+    API --> LF[("📡 Langfuse")]
 ```
 
-## Agent Communication (Shared State Bus)
+### Request lifecycle
 
-Agents communicate exclusively through structured dicts in `FinSageState`. No direct agent-to-agent calls.
+1. **Input guardrail** — local checks. Small talk and refusals short-circuit here.
+2. **Supervisor** — picks agents, extracts entities, writes an execution plan.
+3. **Stages 1→3** — agents run, later stages reading earlier stages' output.
+4. **Review gate** — scores data completeness, flags contradictions. No LLM call.
+5. **Synthesis** — one answer in a human voice.
+6. **Output guardrail** — softens certainty language, guarantees a disclaimer.
 
-| State Key | Written By | Read By |
-|-----------|-----------|--------|
-| `input_safe` | Input Guardrail | Graph Router |
-| `salary_analysis` | Salary Agent | Tax Agent, MF Agent |
-| `tax_analysis` | Tax Agent | MF Agent |
-| `news_analysis` | News Agent | Market Agent |
-| `market_analysis` | Market Agent | Trading Agent, MF Agent |
-| `review_output` | Review Agent | Synthesis Agent |
-| `output_safe` | Output Guardrail | — |
+---
 
-### Execution Example
+## Agents and Models
 
-Query: `"I earn 12 LPA. How can I reduce taxes and invest wisely?"`
+Three Groq tiers, defined in `config/models.py`:
 
-| Stage | Agents Run | Data Flow |
-|-------|-----------|----------|
-| Input Guardrail | NeMo Rails | checks query → `input_safe=true` |
-| Supervisor | — | `selected_agents=["salary","tax","mutual_fund","market"]` |
-| Stage 1 | Salary | writes `salary_analysis` |
-| Stage 2 | Tax, Market | Tax reads `salary_analysis` |
-| Stage 3 | MF | reads `salary_analysis` + `tax_analysis` + `market_analysis` |
-| Review | Review | validates all outputs, scores confidence |
-| Synthesis | Synthesis | combines everything into final recommendation |
-| Output Guardrail | NeMo Rails | ensures disclaimer, checks compliance |
+| Tier | Model | Used by |
+|------|-------|---------|
+| `GROQ_FAST` | `llama-3.1-8b-instant` | Supervisor, News sentiment |
+| `GROQ_STANDARD` | `llama-3.3-70b-versatile` | Market, Salary, General Finance, **Synthesis** |
+| `GROQ_REASONING` | `openai/gpt-oss-120b` | Tax, Technical, Trading, Mutual Fund |
+
+> **Groq retires model IDs without notice.** A retired ID returns HTTP 404, which agents
+> catch and turn into placeholder text — the pipeline keeps "working" while producing
+> nothing useful. See [Troubleshooting](#answers-say-analysis-could-not-be-completed).
+
+| Agent | Stage | Writes | Reads |
+|-------|-------|--------|-------|
+| Salary | 1 | `salary_analysis` | — |
+| News | 1 | `news_analysis` | — |
+| General Finance | 1 | `general_finance_result` | — |
+| Tax | 2 | `tax_analysis` | `salary_analysis` |
+| Market | 2 | `market_analysis` | `news_analysis` |
+| Mutual Fund | 3 | `mf_analysis` | `salary` + `tax` + `market` |
+| Trading | 3 | `trading_analysis_output` | `market_analysis` |
+| Technical | 3 | `technical_analysis` | — |
+| Review | 4 | `review_output` | all of the above |
+| Synthesis | 5 | `recommendation`, `confidence` | everything |
+
+### Shared state bus
+
+Agents never call each other. All communication goes through typed keys in
+`FinSageState` (`agents/state.py`).
+
+Because agents within a stage run **in parallel**, each gets a shallow copy of the state
+and only its own output key is merged back — concurrent writes cannot clobber each other.
+RAG context is additive and folded in across branches.
+
+---
+
+## Data Sources
+
+The NSE/Yahoo split is deliberate — each covers what the other cannot:
+
+| Data | Source | Notes |
+|------|--------|-------|
+| Index quotes | **NSE** `/api/allIndices` | NIFTY, BANKNIFTY, SENSEX… |
+| Equity quotes | **NSE** `/api/NextApi/...getSymbolData` | Needs `marketType=N`; returns sector, P/E, delivery %, volatility |
+| Option chain | **NSE** `/api/option-chain-v3` | Requires `&expiry=`; Yahoo has **no** Indian options data |
+| Fundamentals | **Yahoo** | ROE, debt/equity, margins, beta — not exposed by NSE |
+| Historical OHLCV | **Yahoo** | Feeds the technical indicators |
+| Mutual funds | **AMFI** via `mftool` | NAV, category, trailing returns |
+| News | RSS feeds | Headline sentiment |
+
+**NSE requires a browser TLS fingerprint.** It sits behind Akamai, which rejects plain
+`requests` with 403 on the homepage itself. `curl_cffi` with `impersonate="chrome"` is
+required, not optional.
+
+---
+
+## RAG Pipeline
+
+```
+query -> HF Inference API (384-dim embedding) -> Pinecone (cosine, top_k) -> chunks
+```
+
+- **Model:** `sentence-transformers/all-MiniLM-L6-v2` — 384 dimensions
+- **Embeddings:** Hugging Face Inference API only. There is **no local model** by design,
+  so an outage surfaces immediately instead of being silently masked.
+- **Store:** Pinecone, dimension 384, metric cosine. Chunk text lives in vector metadata,
+  so there is no side file that can drift out of sync with the vectors.
+- **Caching:** whole retrievals are cached, not just embeddings — several agents hit RAG
+  within one query, and repeats resolve in ~0ms.
+
+Retrieval results are explicitly **sorted by score**: serverless Pinecone gathers matches
+across shards and does not always return them globally sorted, and agents truncate the
+context they receive — so the strongest chunk has to be first or it can be cut off.
+
+Endpoint note: the legacy `api-inference.huggingface.co` host was retired and no longer
+resolves. The current path is `router.huggingface.co/hf-inference/...`.
+
+---
+
+## Guardrail Policy
+
+Deliberately minimal and entirely local — no LLM call, microseconds:
+
+| Input | Behaviour |
+|-------|-----------|
+| "hi", "what can you do?", "thanks", "bye" | Answered directly with a friendly reply |
+| Any finance question | Passed to the full pipeline |
+| Ambiguous / finance-adjacent | **Passed** — a false block is worse than a false allow |
+| Hacking, malware, credential theft | Blocked |
+| Money-laundering / tax-evasion how-to | Blocked (questions *about* the law are allowed) |
+| Prompt injection | Blocked |
+| Clearly off-topic (poems, recipes, trivia) | Blocked |
+
+On output, certainty language ("guaranteed returns", "100% safe") is **rewritten** and a
+disclaimer is guaranteed — rather than discarding an otherwise good answer.
+
+Verify with `python scripts/test_guardrails.py`.
+
+---
 
 ## Tech Stack
 
 - Python 3.10+
-- FastAPI + Uvicorn
-- Gradio
+- FastAPI + Uvicorn — serves API **and** UI
 - LangGraph + LangChain
 - Groq API
-- **NVIDIA NeMo Guardrails** (input/output safety rails)
-- **Langfuse** (LLM Telemetry and Observability)
-- MCP (SSE)
-- FAISS + sentence-transformers
-- SQLite + SQLAlchemy
+- FastMCP — in-memory transport
+- Pinecone — vector store
+- Hugging Face Inference API — embeddings
+- Langfuse — telemetry
+- curl_cffi — NSE access
+- SQLite + SQLAlchemy — query logs
+
+---
 
 ## Repository Structure
 
 ```text
 finsage/
-    app.py                  # HF Spaces entrypoint (orchestrates MCP + backend + UI)
-    main.py                 # FastAPI backend entrypoint
-    mcp_server.py           # MCP server (NSE, Yahoo, MF, News tools)
-    mcp_client.py           # Optional MCP test client
-    mcp_bridge.py           # MCP tool bridge for agents
-    mcp_runtime.py          # MCP session lifecycle manager
+    main.py                 # FastAPI backend - THE entrypoint (API + UI)
+    app.py                  # Thin launcher alias (honours PORT, for HF Spaces)
+    mcp_server.py           # FastMCP server definition (tool functions)
+    mcp_bridge.py           # In-memory MCP client for sync agent code
+    observability.py        # Langfuse wiring
     requirements.txt
 
     agents/
-        state.py            # FinSageState TypedDict (shared communication bus)
-        graph.py            # LangGraph StateGraph (guardrail → supervisor → stages → review → synthesis → guardrail)
-        input_guardrail_agent.py  # NeMo input safety gate (blocks off-topic, injection, toxic)
-        output_guardrail_agent.py # NeMo output compliance gate (disclaimers, no guarantees)
-        supervisor_agent.py # LLM-based planner and dynamic agent selector
-        rag_agent.py        # On-demand RAG service with query expansion
-        review_agent.py     # Critic that validates outputs before synthesis
-        salary_agent.py     # Stage 1: writes salary_analysis
-        news_agent.py       # Stage 1: writes news_analysis
-        general_finance_agent.py  # Stage 1: writes general_finance_result
-        tax_agent.py        # Stage 2: reads salary_analysis, writes tax_analysis
-        market_agent.py     # Stage 2: reads news_analysis, writes market_analysis
-        mutual_fund_agent.py # Stage 3: reads salary+tax+market, writes mf_analysis
-        trading_agent.py    # Stage 3: reads market_analysis, writes trading_analysis_output
-        technical_agent.py  # Stage 3: writes technical_analysis
-        synthesis_agent.py  # Final: reads all outputs + review_output
-        intent_agent.py     # [LEGACY] kept for reference, not in graph
+        state.py            # FinSageState TypedDict (shared bus)
+        graph.py            # LangGraph StateGraph, parallel stages
+        guardrail.py        # Local guardrails + small-talk replies
+        supervisor_agent.py # Planner and agent selector
+        rag_agent.py        # On-demand retrieval with query expansion
+        review_agent.py     # Local validation gate (no LLM call)
+        salary_agent.py         # Stage 1
+        news_agent.py           # Stage 1
+        general_finance_agent.py# Stage 1
+        tax_agent.py            # Stage 2
+        market_agent.py         # Stage 2
+        mutual_fund_agent.py    # Stage 3
+        trading_agent.py        # Stage 3
+        technical_agent.py      # Stage 3
+        synthesis_agent.py      # Final answer
 
-    guardrails/             # NVIDIA NeMo Guardrails configuration
-        config.yml          # Model config (Groq via OpenAI-compatible endpoint)
-        config.py           # Environment setup for Groq API key
-        rails.co            # Colang topical + safety rail definitions
-        prompts.yml         # Self-check input/output prompt templates
+    rag/
+        embedder.py         # HF Inference API embeddings (no local model)
+        vector_store.py     # Pinecone client and queries
+        knowledge_base.py   # Retrieval + result cache
+        docs/               # Source .txt knowledge files
 
-    api/                    # FastAPI routes (/chat, /health, /history)
-    config/                 # Settings and model config (Groq models)
-    db/                     # SQLite database setup and CRUD
-    frontend/               # Gradio UI implementation
-    rag/                    # FAISS vector store + sentence-transformers embedder
-    tools/                  # Financial tool integrations (NSE, Yahoo, MF, News, TA)
-    scripts/                # Utility scripts (ingest_docs, test_query, test_guardrails, verify_imports)
+    tools/
+        nse_tool.py         # NSE quotes (index + equity) and option chain
+        yahoo_tool.py       # Fundamentals, intraday, historical OHLCV
+        mf_tool.py          # AMFI mutual fund data
+        news_tool.py        # RSS headlines
+        technical_tool.py   # EMA / RSI / MACD calculations
+
+    api/                    # Routes: /chat, /health, /history
+    config/                 # Settings and Groq model IDs
+    db/                     # SQLite setup and CRUD
+    frontend/static/        # HTML/CSS/JS chat UI
+    scripts/                # ingest_docs, test_query, test_guardrails, verify_imports
 ```
 
-## API Contract
+---
 
-Primary chat endpoint:
+## Setup
 
-- POST /api/chat
-- Request body:
-
-```json
-{
-    "user_id": "string",
-    "query": "string"
-}
-```
-
-- Response body:
-
-```json
-{
-    "answer": "string",
-    "confidence": 0,
-    "intent": "string",
-    "trace": []
-}
-```
-
-
-## Local Setup
-
-### 1. Clone and enter project
-
-```bash
-cd "finance agent/finsage"
-```
-
-### 2. Create and activate virtual environment
-
-Windows:
+### 1. Virtual environment
 
 ```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 ```
 
-Linux/macOS:
-
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv venv && source venv/bin/activate
 ```
 
-### 3. Install dependencies
+### 2. Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment
+### 3. Environment
 
-Create .env in the project root:
+Create `.env` in the `finsage/` directory:
 
 ```env
 GROQ_API_KEY=gsk_your_key_here
 
-# Optional: Langfuse Telemetry keys
+# Embeddings - required for RAG (HF API only, no local model)
+HUGGINGFACE_KEY=hf_your_key_here
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+EMBEDDING_DIM=384
+
+# Vector store - index MUST be dimension 384, metric cosine
+PINECONE_API_KEY=pcsk_your_key_here
+PINECONE_INDEX_NAME=finsage
+PINECONE_NAMESPACE=
+
+# Optional - Langfuse telemetry
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
-### 5. Build RAG index (first run only)
+`LANGFUSE_BASE_URL` is accepted as an alias for `LANGFUSE_HOST`. Use the host matching
+your project's region (`https://us.cloud.langfuse.com` for US) — the wrong region
+authenticates successfully but records nothing.
+
+See `.env.example` for the full list including tuning knobs.
+
+### 4. Load the knowledge base
 
 ```bash
 python scripts/ingest_docs.py
 ```
 
-## Run Modes
+Flags:
 
-### Mode A: Standard local (3 terminals)
+```bash
+python scripts/ingest_docs.py --clear         # wipe the namespace, then ingest
+python scripts/ingest_docs.py --create-index  # create the Pinecone index if missing
+```
 
-Terminal 1 (backend):
+Chunk ids are deterministic (`<file>-<n>`), so a plain re-run updates records in place
+instead of accumulating duplicates.
+
+Re-ingest whenever `rag/docs/` changes. If you change `EMBEDDING_MODEL`, you must also
+recreate the Pinecone index with the new dimension — a mismatch is rejected at ingest.
+
+---
+
+## Running
 
 ```powershell
-cd "e:\AI_Agent\finance agent\finsage"
-venv\Scripts\Activate.ps1
+cd E:\AI_Agent\Finsage\finsage
+..\venv\Scripts\Activate.ps1
 python main.py
 ```
 
-Terminal 2 (MCP server):
+- UI — http://localhost:8000
+- API docs — http://localhost:8000/docs
+- Health — http://localhost:8000/api/health
 
-```powershell
-cd "e:\AI_Agent\finance agent\finsage"
-venv\Scripts\Activate.ps1
+Startup takes ~5s: it opens the MCP in-memory session, the Pinecone connection, the HF
+embedding session, and verifies Langfuse credentials, so the first user query pays none
+of that cost.
+
+### Exposing MCP tools externally (optional)
+
+```bash
 python mcp_server.py
 ```
 
-Terminal 3 (Gradio UI):
+Serves the same tools over stdio for Claude Desktop or MCP Inspector. The backend does
+not need this.
 
-```powershell
-cd "e:\AI_Agent\finance agent\finsage"
-venv\Scripts\Activate.ps1
-python frontend/app.py
+---
+
+## API
+
+**POST** `/api/chat`
+
+```json
+{ "user_id": "string", "query": "string" }
 ```
 
-Open:
+```json
+{ "answer": "string", "confidence": 95, "intent": "tax", "trace": ["..."] }
+```
 
-- UI: http://localhost:7860
-- API docs: http://localhost:8000/docs
-- Health: http://localhost:8000/api/health
+**GET** `/api/health`
 
-### Mode B: Single-entry orchestrated run (recommended for HF Spaces)
+```json
+{
+  "status": "ok",
+  "version": "0.5.0",
+  "architecture": "supervisor-staged-parallel",
+  "mcp_transport": "in-memory (fastmcp)",
+  "mcp_connected": true,
+  "mcp_tools": ["nse_quote", "stock_data", "company_profile", "intraday_data",
+                "options_chain", "market_status", "mf_details", "market_news"],
+  "langfuse_enabled": true,
+  "rag": {
+    "vector_store": "pinecone",
+    "index": "finsage",
+    "connected": true,
+    "vectors": 118,
+    "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "embedding_dim": 384,
+    "embedding_source": "huggingface-api"
+  }
+}
+```
+
+**GET** `/api/history/{user_id}` — the user's recent queries.
+
+---
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/ingest_docs.py` | Embed `rag/docs/` and upsert into Pinecone |
+| `scripts/test_query.py` | Run queries through the graph without a server |
+| `scripts/test_guardrails.py` | Assert the guardrail policy |
+| `scripts/verify_imports.py` | Check every agent module imports and the graph compiles |
 
 ```bash
-python app.py
+python scripts/test_query.py                              # standard set
+python scripts/test_query.py "How much tax on 3L LTCG?"   # ad-hoc
 ```
 
-This starts:
+---
 
-1. MCP server (default port 7861)
-2. FastAPI backend (default port 8000)
-3. Gradio UI (default port 7860 or PORT env in Spaces)
+## Observability
 
-## Hugging Face Spaces Deployment
+With Langfuse keys present, every `/api/chat` call is traced as `finsage_query`, with one
+observation per graph node plus token usage and latency. Startup logs
+`[OK] Langfuse telemetry active` and `/api/health` reports `langfuse_enabled`.
 
-Use Gradio Space with Python runtime.
+If credentials are missing or wrong, initialisation logs a warning and the app continues
+without tracing — telemetry never fails a user request.
 
-### Required
+---
 
-1. Ensure app.py is the entrypoint in repository root.
-2. Add secret:
-     - GROQ_API_KEY
-3. Keep requirements.txt updated.
+## Performance
 
-### Recommended Space Variables
+Measured on a warm instance:
 
-- PORT=7860
-- MCP_PORT=7861
-- BACKEND_HOST=127.0.0.1
-- BACKEND_PORT=8000
-- MCP_TRANSPORT=sse
-- MCP_STARTUP_TIMEOUT=15
-- BACKEND_STARTUP_TIMEOUT=25
+| Path | Typical |
+|------|---------|
+| Small talk / blocked | 0.1 – 0.4s (skips the pipeline entirely) |
+| Single agent (e.g. tax) | 5 – 8s |
+| Two to three agents | 9 – 13s |
+| MCP tool call | ~2ms (in-memory) |
+| NSE quote | 0.1 – 0.4s |
+| RAG retrieval | ~540ms cold, ~0ms cached |
+| Startup | ~5s |
 
-Notes:
+End-to-end latency is dominated by Groq generation, and reasoning-tier calls vary
+noticeably run to run. The stage split exists so independent agents overlap rather than
+serialise; agents in different stages still run in order because of their data dependencies.
 
-- If GROQ_API_KEY is missing, app.py now logs a warning and can still boot, but AI responses will fail until the secret is added.
-- MCP_TRANSPORT=http is currently not supported by the included mcp_client.py path (SSE-only client code).
-
-## MCP Usage
-
-### Backend-integrated MCP
-
-When the backend starts, it initializes an MCP client runtime and lists available tools.
-
-Health endpoint shows MCP status:
-
-- mcp_connected
-- mcp_tools
-
-### Optional manual MCP client
-
-```bash
-python mcp_client.py
-```
-
-One-shot query:
-
-```bash
-python mcp_client.py --query "What is the current stock price of TCS?"
-```
+---
 
 ## Troubleshooting
 
-### Backend fails with GROQ_API_KEY validation error
+### Answers say analysis "could not be completed"
 
-Cause:
+Almost always a retired Groq model ID returning HTTP 404. List what is live:
 
-- Missing GROQ_API_KEY in environment or Space secrets.
-
-Fix:
-
-1. Add GROQ_API_KEY in .env (local) or Space Secrets (HF).
-2. Restart the app.
-
-### app.py fails with backend startup timeout
-
-Cause:
-
-- Backend crashed during import/startup.
-
-Fix:
-
-1. Check container logs for the first stack trace.
-2. Verify GROQ_API_KEY is present.
-3. Increase BACKEND_STARTUP_TIMEOUT if cold start is slow.
-
-### UI loads but answers fail
-
-Cause:
-
-- Missing API key, MCP endpoint mismatch, or upstream tool issue.
-
-Fix:
-
-1. Check /api/health.
-2. Confirm mcp_connected is true.
-3. Verify MCP_SERVER_URL and MCP port values.
-
-## Development Notes
-
-- frontend/app.py contains create_ui(), used by both direct UI run and app.py orchestrator mode.
-- app.py is intended for orchestrated startup in environments that only execute one entry file.
-- main.py remains the standalone backend entrypoint.
-- intent_agent.py is kept as legacy reference but is no longer wired into the graph.
-
-## Architecture v3 Summary
-
-The system was refactored from a simple `Intent → Route → Synthesize` pipeline to a guardrail-gated architecture:
-
-```
-Input Guardrail → [conditional] → Supervisor → Stage 1 → Stage 2 → Stage 3 → Review → Synthesis → Output Guardrail
-                       ↓ (blocked)
-                  Reject Response → END
+```python
+from groq import Groq
+print([m.id for m in Groq(api_key="...").models.list().data])
 ```
 
-Key design decisions:
+Then update `config/models.py`.
 
-- **NeMo Guardrails**: NVIDIA NeMo Guardrails with Colang topical rails + self-check prompts for input/output safety
-- **Conditional routing**: Blocked queries skip the entire pipeline via LangGraph conditional edges, saving API tokens
-- **Fail-open design**: If guardrails fail to load, the system continues working (allows queries, ensures disclaimers)
-- **Supervisor over Intent**: LLM-based multi-agent selection instead of keyword routing
-- **Staged execution**: Dependency-aware ordering ensures upstream data exists before downstream agents run
-- **On-demand RAG**: Not a graph node — agents call `rag_agent.retrieve_for_agent()` only when they need knowledge context
-- **Review gate**: Catches contradictions, missing data, and unsupported claims before synthesis
-- **Confidence blending**: Final confidence = 60% LLM self-assessment + 40% Review Agent score
+### Every NSE call returns 403
+
+NSE fingerprints the TLS handshake. `curl_cffi` is required:
+
+```bash
+pip install curl_cffi
+```
+
+Without it `nse_tool.py` falls back to plain `requests` and most calls fail.
+
+### NSE endpoints suddenly 404
+
+NSE versions and retires paths without notice. Already retired:
+`/api/quote-equity` (403, WAF-blocked), `/api/equity-stockIndices` (404),
+`/api/option-chain-indices` (404).
+
+Read the current endpoints out of NSE's own JS bundle:
+
+```python
+import re
+from curl_cffi import requests as cr
+
+s = cr.Session(impersonate="chrome")
+s.get("https://www.nseindia.com")
+html = s.get("https://www.nseindia.com/get-quotes/equity?symbol=RELIANCE").text
+
+for js in re.findall(r'src="([^"]+\.js[^"]*)"', html):
+    url = js if js.startswith("http") else "https://www.nseindia.com" + js
+    print(set(re.findall(r'/api/[A-Za-z0-9\-_/]+', s.get(url).text)))
+```
+
+### RAG returns "Knowledge base unavailable" or "is empty"
+
+Check `/api/health` → `rag` first: it reports the Pinecone connection and live vector count.
+
+- `vectors: 0` → run `python scripts/ingest_docs.py`
+- `connected: false` → check `PINECONE_API_KEY` and `PINECONE_INDEX_NAME`
+- Embedding errors → verify the HF key and endpoint:
+
+```python
+from rag.embedder import embed_query
+print(embed_query("test").shape)   # -> (1, 384)
+```
+
+A dimension mismatch between `EMBEDDING_MODEL` and the Pinecone index raises at ingest
+rather than corrupting the store.
+
+### Langfuse dashboard is empty
+
+1. `/api/health` → `langfuse_enabled: true`?
+2. Does `LANGFUSE_HOST` match your project's region?
+3. Check `[Langfuse]` warnings in the startup log.
+
+---
+
+## Version History
+
+### v5 — Pinecone
+
+- **Pinecone replaces FAISS.** Chunk text lives in vector metadata, so `chunks.pkl` and
+  `faiss.index` are gone along with the drift risk between them.
+- **Local embedding model removed.** Embeddings come from Hugging Face only; the 175MB
+  `model_cache/`, `sentence-transformers` and `faiss-cpu` are dropped.
+- **Retrieval results sorted by score** — serverless Pinecone does not guarantee ordering.
+- `/api/health` now reports RAG status.
+
+### v4 — Latency and correctness
+
+- **Local guardrails** replace NeMo Guardrails — removed two full LLM generations per
+  query and fixed conversational openers being wrongly refused.
+- **Parallel stage execution** — independent agents no longer wait on each other.
+- **In-memory MCP** replaces the SSE server — no second process, no startup race.
+- **Local review gate** replaces an LLM critic call.
+- **Fixed the dead reasoning model** — `qwen/qwen3-32b` had been retired, silently
+  breaking the Tax, Technical, Trading and Mutual Fund agents.
+- **Live NSE option chain** replaces a Yahoo path that returned empty for every Indian
+  symbol.
+- **NSE equity quotes restored** via `curl_cffi` and the current `NextApi` endpoint.
+- **Fixed Langfuse** — the SDK v2 import paths did not exist in v4, so tracing silently
+  no-oped, and the host env var was being read from the wrong name.
+- **Fixed HF embeddings** — the configured endpoint host had been retired and no longer
+  resolved, so every retrieval failed silently.
+- **Voice mode removed** (STT/TTS/VAD) — the product is text-only.
+- **Confidence** is computed from the review gate instead of being printed by the model
+  inside the answer.
+
+### v3 — Supervisor architecture
+
+Supervisor planning, dependency-staged execution, review gate, and shared state bus
+replaced the original `Intent → Route → Synthesize` pipeline.
+
+---
 
 ## License and Disclaimer
 
-This project is provided for educational purposes. It does not provide certified financial advice. Always consult a qualified financial advisor before making investment decisions.
+Provided for educational purposes. This is not certified financial advice. Always consult
+a qualified financial advisor before making investment decisions.

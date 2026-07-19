@@ -10,8 +10,10 @@ from groq import Groq
 from config.settings import settings
 from config.models import GROQ_STANDARD
 from mcp_bridge import call_mcp_tool, is_mcp_enabled
-from tools.nse_tool import get_nse_quote
+from tools.nse_tool import INDEX_NAMES, get_nse_quote
 from tools.yahoo_tool import get_stock_data, get_company_profile
+
+INDEX_SYMBOLS = set(INDEX_NAMES)
 
 
 def run(state: dict) -> dict:
@@ -42,28 +44,47 @@ def run(state: dict) -> dict:
         market_mood = news_info.get("market_mood", "neutral")
         key_events = news_info.get("key_events", "")
 
-        # Try MCP tools first (if enabled), then local tools as fallback.
-        source = "NSE"
+        # NSE is the primary source for BOTH indices and equities now that the
+        # current NextApi endpoint is wired up — it returns exchange-native
+        # prices plus sector, PE and delivery data. Yahoo remains the fallback
+        # and still supplies the fundamentals NSE does not expose (ROE, D/E).
         market_data = {}
+        nse_error = None
+        source = "Yahoo Finance"
+
         try:
-            if is_mcp_enabled():
-                market_data = call_mcp_tool("nse_quote", {"symbol": symbol})
-                source = "MCP:NSE"
+            market_data = (
+                call_mcp_tool("nse_quote", {"symbol": symbol})
+                if is_mcp_enabled()
+                else get_nse_quote(symbol)
+            )
+            if isinstance(market_data, dict) and market_data.get("error"):
+                nse_error = market_data["error"]
+                market_data = {}
             else:
-                market_data = get_nse_quote(symbol)
-        except Exception as nse_error:
-            source = "Yahoo Finance"
+                source = "MCP:NSE" if is_mcp_enabled() else "NSE"
+        except Exception as exc:
+            nse_error = str(exc)[:80]
+            market_data = {}
+
+        if not market_data:
             try:
-                if is_mcp_enabled():
-                    market_data = call_mcp_tool("stock_data", {"symbol": symbol})
-                    source = "MCP:Yahoo"
-                else:
-                    market_data = get_stock_data(symbol)
+                market_data = (
+                    call_mcp_tool("stock_data", {"symbol": symbol})
+                    if is_mcp_enabled()
+                    else get_stock_data(symbol)
+                )
+                if isinstance(market_data, dict) and market_data.get("error"):
+                    raise Exception(market_data["error"])
+                source = "MCP:Yahoo" if is_mcp_enabled() else "Yahoo Finance"
             except Exception as yahoo_error:
                 state["market_analysis"] = {
                     "market_data": {
                         "symbol": symbol,
-                        "error": f"NSE: {str(nse_error)[:80]} | Yahoo: {str(yahoo_error)[:80]}",
+                        "error": (
+                            f"Yahoo: {str(yahoo_error)[:80]}"
+                            + (f" | NSE: {nse_error}" if nse_error else "")
+                        ),
                         "source": "unavailable",
                     },
                     "company_profile": {},
@@ -82,10 +103,14 @@ def run(state: dict) -> dict:
         profile = {}
         if intent == "stock" or (entities.get("stock") and intent != "index"):
             try:
-                if is_mcp_enabled():
-                    profile = call_mcp_tool("company_profile", {"symbol": symbol})
-                else:
-                    profile = get_company_profile(symbol)
+                profile = (
+                    call_mcp_tool("company_profile", {"symbol": symbol})
+                    if is_mcp_enabled()
+                    else get_company_profile(symbol)
+                )
+                # call_mcp_tool reports failure in-band rather than raising.
+                if not isinstance(profile, dict) or profile.get("error"):
+                    profile = {}
             except Exception:
                 profile = {}
 

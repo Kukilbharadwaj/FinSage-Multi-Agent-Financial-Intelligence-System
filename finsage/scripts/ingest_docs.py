@@ -1,20 +1,31 @@
 # scripts/ingest_docs.py
-# Run this script once to build the FAISS index from rag/docs/.
-# Usage: python scripts/ingest_docs.py
+# Load rag/docs/ into Pinecone.
+#
+# Usage:
+#   python scripts/ingest_docs.py                 # upsert (overwrites by id)
+#   python scripts/ingest_docs.py --clear         # wipe the namespace first
+#   python scripts/ingest_docs.py --create-index  # create the index if missing
+#
+# Chunk ids are deterministic (<filename>-<n>), so re-running updates existing
+# records in place instead of accumulating duplicates.
 
+import argparse
 import os
 import sys
-import pickle
-import faiss
-import numpy as np
 
-# Add project root to path so we can import rag modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rag.embedder import embed
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from rag.embedder import EMBEDDING_DIM, MODEL_ID, embed
+from rag.vector_store import INDEX_NAME, NAMESPACE, clear, get_index, upsert, vector_count
+
+CHUNK_SIZE = 300
 
 
-def split_into_chunks(text: str, chunk_size: int = 300) -> list:
+def split_into_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> list:
     """
     Split text into chunks of approximately `chunk_size` characters.
     Splits on word boundaries — never splits mid-word.
@@ -40,58 +51,107 @@ def split_into_chunks(text: str, chunk_size: int = 300) -> list:
     return chunks
 
 
-def main():
-    """Build FAISS index from all .txt files in rag/docs/."""
-    docs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rag", "docs")
-    rag_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rag")
+def create_index_if_missing() -> None:
+    """Create the Pinecone index with the dimensions the embedder produces."""
+    from pinecone import Pinecone, ServerlessSpec
 
-    index_path = os.path.join(rag_dir, "faiss.index")
-    chunks_path = os.path.join(rag_dir, "chunks.pkl")
+    client = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
 
-    print("=" * 60)
-    print("FinSage AI — Knowledge Base Ingestion")
-    print("=" * 60)
+    if client.has_index(INDEX_NAME):
+        print(f"  Index '{INDEX_NAME}' already exists")
+        return
 
-    # Read all .txt files
-    all_chunks = []
-    txt_files = [f for f in os.listdir(docs_dir) if f.endswith(".txt")]
+    print(f"  Creating index '{INDEX_NAME}' (dim={EMBEDDING_DIM}, metric=cosine)...")
+    client.create_index(
+        name=INDEX_NAME,
+        dimension=EMBEDDING_DIM,
+        metric="cosine",
+        spec=ServerlessSpec(
+            cloud=os.getenv("PINECONE_CLOUD", "aws"),
+            region=os.getenv("PINECONE_REGION", "us-east-1"),
+        ),
+    )
+    print("  Index created")
 
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Ingest rag/docs into Pinecone")
+    parser.add_argument("--clear", action="store_true", help="delete all vectors before ingesting")
+    parser.add_argument("--create-index", action="store_true", help="create the index if it is missing")
+    args = parser.parse_args()
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    docs_dir = os.path.join(root, "rag", "docs")
+
+    print("=" * 62)
+    print("FinSage AI - Knowledge Base Ingestion (Pinecone)")
+    print("=" * 62)
+    print(f"  Model:     {MODEL_ID} ({EMBEDDING_DIM}d, Hugging Face API)")
+    print(f"  Index:     {INDEX_NAME}")
+    print(f"  Namespace: {NAMESPACE or '(default)'}")
+    print()
+
+    if args.create_index:
+        create_index_if_missing()
+
+    # Verify the index dimension matches the embedder before doing any work.
+    try:
+        get_index()
+    except Exception as exc:
+        print(f"  ERROR: {exc}")
+        print("  Hint: run with --create-index to create it automatically.")
+        return 1
+
+    txt_files = sorted(f for f in os.listdir(docs_dir) if f.endswith(".txt"))
     if not txt_files:
-        print("ERROR: No .txt files found in rag/docs/")
-        sys.exit(1)
+        print("  ERROR: No .txt files found in rag/docs/")
+        return 1
 
-    for filename in sorted(txt_files):
-        filepath = os.path.join(docs_dir, filename)
-        with open(filepath, "r", encoding="utf-8") as f:
+    records = []
+    for filename in txt_files:
+        with open(os.path.join(docs_dir, filename), "r", encoding="utf-8") as f:
             content = f.read()
 
-        chunks = split_into_chunks(content, chunk_size=300)
+        chunks = split_into_chunks(content)
         print(f"  [DOC] {filename}: {len(chunks)} chunks")
-        all_chunks.extend(chunks)
 
-    print(f"\n  Total chunks: {len(all_chunks)}")
-    print(f"\n  Embedding chunks using all-MiniLM-L6-v2...")
+        stem = filename.replace(".txt", "")
+        for i, chunk in enumerate(chunks):
+            records.append({"id": f"{stem}-{i}", "text": chunk, "source": filename})
 
-    # Embed all chunks
-    embeddings = embed(all_chunks)
-    print(f"  Embedding shape: {embeddings.shape}")
+    print(f"\n  Total chunks: {len(records)}")
 
-    # Build FAISS index
-    dimension = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(embeddings.astype(np.float32))
-    print(f"  FAISS index built with {index.ntotal} vectors")
+    if args.clear:
+        print("  Clearing existing vectors...")
+        clear()
 
-    # Save index and chunks
-    faiss.write_index(index, index_path)
-    with open(chunks_path, "wb") as f:
-        pickle.dump(all_chunks, f)
+    print(f"  Embedding via Hugging Face API...")
+    vectors = embed([r["text"] for r in records])
+    print(f"  Embedding shape: {vectors.shape}")
 
-    print(f"\n  [OK] Index saved to: {index_path}")
-    print(f"  [OK] Chunks saved to: {chunks_path}")
-    print("=" * 60)
+    if vectors.shape[1] != EMBEDDING_DIM:
+        print(f"  ERROR: got {vectors.shape[1]}-dim vectors, index expects {EMBEDDING_DIM}")
+        return 1
+
+    payload = [
+        {
+            "id": record["id"],
+            "values": vectors[i].tolist(),
+            # Chunk text rides along as metadata so retrieval needs no side file.
+            "metadata": {"text": record["text"], "source": record["source"]},
+        }
+        for i, record in enumerate(records)
+    ]
+
+    print(f"  Upserting {len(payload)} vectors to Pinecone...")
+    sent = upsert(payload)
+
+    print(f"\n  [OK] Upserted {sent} vectors")
+    print(f"  [OK] Index now reports {vector_count()} vectors")
+    print("=" * 62)
     print("Knowledge base ready!")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

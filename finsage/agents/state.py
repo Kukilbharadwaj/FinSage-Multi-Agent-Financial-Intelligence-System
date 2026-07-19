@@ -57,10 +57,11 @@ class FinSageState(TypedDict):
     # ── Review gate ───────────────────────────────────────────
     review_output: Optional[dict]           # {issues, corrections, confidence_score, approved}
 
-    # ── Guardrail gate ────────────────────────────────────────
-    input_safe: Optional[bool]              # True if input passed NeMo guardrails
-    input_reject_reason: Optional[str]      # reason if input was blocked (empty if safe)
-    output_safe: Optional[bool]             # True if output passed NeMo guardrails
+    # ── Guardrail gate (local checks — see agents/guardrail.py) ──
+    input_safe: Optional[bool]              # True if the query should run the full pipeline
+    guardrail_action: Optional[str]         # "allow" | "smalltalk" | "block"
+    input_reject_reason: Optional[str]      # the direct reply to send when not "allow"
+    output_safe: Optional[bool]             # True once the output has been sanitized
 
     # ── Final output ──────────────────────────────────────────
     recommendation: Optional[str]           # the final formatted answer shown to user

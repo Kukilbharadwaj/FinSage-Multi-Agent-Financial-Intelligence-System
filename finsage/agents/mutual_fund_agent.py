@@ -1,7 +1,7 @@
 # agents/mutual_fund_agent.py
 # Indian Mutual Fund analysis agent.
 # Fetches fund details, NAV, returns, and provides investment analysis.
-# Model: GROQ_REASONING (qwen/qwen3-32b) — detailed fund analysis
+# Model: GROQ_REASONING (openai/gpt-oss-120b) — detailed fund analysis
 #
 # Stage 3 agent — reads salary_analysis, tax_analysis, market_analysis.
 # Writes: state["mf_analysis"]

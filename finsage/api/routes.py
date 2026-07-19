@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from agents.graph import app_graph
 from db.database import get_db
 from db.crud import save_query_log, get_recent_queries
-from mcp_runtime import has_live_session, get_tools
+from mcp_bridge import has_live_session, get_tools
+from observability import get_callbacks, is_enabled as langfuse_enabled
 
 router = APIRouter()
 
@@ -68,8 +69,9 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
             # Review gate (populated by review_agent)
             "review_output": None,
 
-            # Guardrail gate (populated by input/output guardrail agents)
+            # Guardrail gate (populated by the local guardrail in agents/guardrail.py)
             "input_safe": None,
+            "guardrail_action": None,
             "input_reject_reason": None,
             "output_safe": None,
 
@@ -80,16 +82,22 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
             "trace": [],
         }
 
-        # Set up Langfuse telemetry callback
-        try:
-            from langfuse.callback import CallbackHandler
-            langfuse_handler = CallbackHandler()
-            callbacks = [langfuse_handler]
-        except ImportError:
-            callbacks = []
+        # Set up Langfuse telemetry callback (empty list when disabled)
+        callbacks = get_callbacks()
 
         # Run the full agent graph
-        result = app_graph.invoke(initial_state, config={"callbacks": callbacks})
+        result = app_graph.invoke(
+            initial_state,
+            config={
+                "callbacks": callbacks,
+                "run_name": "finsage_query",
+                "metadata": {
+                    "langfuse_user_id": request.user_id,
+                    "langfuse_session_id": request.user_id,
+                    "langfuse_tags": ["finsage", "chat"],
+                },
+            },
+        )
 
         # Extract results
         recommendation = result.get("recommendation", "No recommendation generated.")
@@ -132,12 +140,34 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
 @router.get("/health")
 def health():
     """Health check endpoint."""
+    # Report the vector store inline — RAG now depends on two external
+    # services, so a silent outage should be visible here rather than only
+    # showing up as vague answers.
+    try:
+        from rag.embedder import EMBEDDING_DIM, MODEL_ID
+        from rag.vector_store import INDEX_NAME, is_ready, vector_count
+
+        rag_status = {
+            "vector_store": "pinecone",
+            "index": INDEX_NAME,
+            "connected": is_ready(),
+            "vectors": vector_count(),
+            "embedding_model": MODEL_ID,
+            "embedding_dim": EMBEDDING_DIM,
+            "embedding_source": "huggingface-api",
+        }
+    except Exception as exc:
+        rag_status = {"vector_store": "pinecone", "connected": False, "error": str(exc)[:150]}
+
     return {
         "status": "ok",
-        "version": "0.2.0",
-        "architecture": "supervisor-staged-review",
+        "version": "0.5.0",
+        "architecture": "supervisor-staged-parallel",
+        "mcp_transport": "in-memory (fastmcp)",
         "mcp_connected": has_live_session(),
         "mcp_tools": get_tools(),
+        "langfuse_enabled": langfuse_enabled(),
+        "rag": rag_status,
     }
 
 

@@ -1,6 +1,6 @@
 # agents/tax_agent.py
 # Indian tax rules: STCG, LTCG, 80C calculations using RAG + qwen3 reasoning.
-# Model: GROQ_REASONING (qwen/qwen3-32b) — step-by-step tax math
+# Model: GROQ_REASONING (openai/gpt-oss-120b) — step-by-step tax math
 #
 # Stage 2 agent — reads salary_analysis from shared state.
 # Writes: state["tax_analysis"] (read by mutual_fund_agent)
@@ -47,7 +47,7 @@ Salary information (from salary analysis):
 - Investable Income: ₹{investable_income:,.0f}
 """
 
-        # Build messages for qwen3-32b reasoning
+        # Build messages for the reasoning model
         system_message = "You are an Indian tax calculation expert. Calculate taxes step by step with precise rupee amounts."
 
         user_message = f"""
@@ -140,7 +140,7 @@ At the end, provide a JSON block:
         }
 
         state["trace"].append(
-            "tax_agent → calculated via qwen3 + RAG"
+            "tax_agent → calculated via reasoning model + RAG"
             + (" + salary context" if annual_salary else "")
         )
 

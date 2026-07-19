@@ -1,6 +1,6 @@
 # agents/technical_agent.py
 # Calculates and interprets technical indicators.
-# Model: GROQ_REASONING (qwen/qwen3-32b) — step-by-step reasoning for TA interpretation
+# Model: GROQ_REASONING (openai/gpt-oss-120b) — step-by-step reasoning for TA interpretation
 #
 # Stage 3 agent — no upstream dependencies (pure calculation + LLM interpretation).
 # Does NOT use RAG.
@@ -80,7 +80,7 @@ def run(state: dict) -> dict:
             state["trace"].append(f"technical_agent → indicator calculation failed for {symbol}")
             return state
 
-        # Build messages for qwen3-32b reasoning
+        # Build messages for the reasoning model
         system_message = "You are a technical analysis expert for Indian stock markets. Analyze indicators step by step and give clear trading signals."
 
         user_message = f"""I have the following technical indicators for {symbol}:

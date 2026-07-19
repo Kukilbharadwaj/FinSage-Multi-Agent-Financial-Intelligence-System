@@ -2,8 +2,8 @@
 # Load environment variables using pydantic-settings.
 # Every agent imports the `settings` object from here.
 
-from pydantic_settings import BaseSettings
 from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -15,16 +15,16 @@ class Settings(BaseSettings):
     )
     MCP_ENABLED: bool = Field(
         default=True,
-        description="Enable MCP tool calls from agent pipeline when available.",
-    )
-    MCP_SERVER_URL: str = Field(
-        default="http://localhost:8001/sse",
-        description="FinSage MCP server SSE endpoint.",
+        description="Enable MCP tool calls from the agent pipeline.",
     )
     MCP_TIMEOUT_SECONDS: int = Field(
         default=20,
         description="Timeout (seconds) for each MCP tool call.",
     )
+
+    # MCP_SERVER_URL was removed in v4. Tools are now reached over FastMCP's
+    # in-memory transport inside this process, so there is no server URL,
+    # no port, and no SSE endpoint to configure.
 
     class Config:
         env_file = ".env"

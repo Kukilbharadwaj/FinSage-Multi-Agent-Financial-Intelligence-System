@@ -1,7 +1,7 @@
 # agents/trading_agent.py
 # Intraday and Options/F&O trading analysis agent.
 # Fetches live intraday data, options chain, and provides trading signals.
-# Model: GROQ_REASONING (qwen/qwen3-32b) — step-by-step trading strategy
+# Model: GROQ_REASONING (openai/gpt-oss-120b) — step-by-step trading strategy
 #
 # Stage 3 agent — reads market_analysis from shared state.
 # Writes: state["trading_analysis_output"]
@@ -115,31 +115,45 @@ def run(state: dict) -> dict:
 - Volatility: {market_volatility}""")
 
         if options_data and "error" not in options_data:
-            # Format top calls and puts
-            top_calls = options_data.get("calls", [])[:5]
-            top_puts = options_data.get("puts", [])[:5]
+            # Strikes arrive from NSE sorted around ATM. Show them as a single
+            # aligned ladder so the model can read call/put OI side by side —
+            # that pairing is what identifies support and resistance walls.
+            calls_by_strike = {c["strike"]: c for c in options_data.get("calls", [])}
+            puts_by_strike = {p["strike"]: p for p in options_data.get("puts", [])}
+            atm = options_data.get("atm_strike")
 
-            calls_text = "\n".join([
-                f"  Strike ₹{c['strike']}: Premium ₹{c['lastPrice']}, OI={c['openInterest']}, IV={c['impliedVolatility']}%"
-                for c in top_calls
-            ])
-            puts_text = "\n".join([
-                f"  Strike ₹{p['strike']}: Premium ₹{p['lastPrice']}, OI={p['openInterest']}, IV={p['impliedVolatility']}%"
-                for p in top_puts
-            ])
+            ladder_rows = []
+            for strike in sorted(set(calls_by_strike) | set(puts_by_strike)):
+                call = calls_by_strike.get(strike, {})
+                put = puts_by_strike.get(strike, {})
+                marker = "  <- ATM" if strike == atm else ""
+                ladder_rows.append(
+                    f"  {strike:>9,.0f} | "
+                    f"CE ₹{call.get('lastPrice', 0):>8,.2f} OI {call.get('openInterest', 0):>9,} "
+                    f"(chg {call.get('changeInOI', 0):>+8,}) IV {call.get('impliedVolatility', 0):>5.1f}% | "
+                    f"PE ₹{put.get('lastPrice', 0):>8,.2f} OI {put.get('openInterest', 0):>9,} "
+                    f"(chg {put.get('changeInOI', 0):>+8,}) IV {put.get('impliedVolatility', 0):>5.1f}%"
+                    f"{marker}"
+                )
 
-            data_parts.append(f"""OPTIONS CHAIN for {symbol} (Expiry: {options_data.get('expiry', 'N/A')}):
-- Current Price: ₹{options_data.get('current_price', 'N/A')}
+            # Highest-OI strikes are the levels traders actually watch.
+            top_call_wall = max(calls_by_strike.values(), key=lambda c: c.get("openInterest", 0), default={})
+            top_put_wall = max(puts_by_strike.values(), key=lambda p: p.get("openInterest", 0), default={})
+
+            data_parts.append(f"""LIVE NSE OPTION CHAIN for {symbol} (Expiry: {options_data.get('expiry', 'N/A')}):
+- Underlying (spot): ₹{options_data.get('underlying_value', 'N/A')}
+- ATM Strike: ₹{atm}
 - Put-Call Ratio (PCR): {options_data.get('pcr', 'N/A')}
 - Max Pain: ₹{options_data.get('max_pain', 'N/A')}
-- Total Call OI: {options_data.get('total_call_oi', 'N/A')}
-- Total Put OI: {options_data.get('total_put_oi', 'N/A')}
+- Total Call OI: {options_data.get('total_call_oi', 0):,} | Total Put OI: {options_data.get('total_put_oi', 0):,}
+- Highest Call OI (resistance): ₹{top_call_wall.get('strike', 'N/A')} with {top_call_wall.get('openInterest', 0):,} OI
+- Highest Put OI (support): ₹{top_put_wall.get('strike', 'N/A')} with {top_put_wall.get('openInterest', 0):,} OI
 
-Top Calls (by volume):
-{calls_text}
+Strike ladder around ATM:
+{chr(10).join(ladder_rows)}
 
-Top Puts (by volume):
-{puts_text}""")
+Read PCR > 1 as put-heavy (supportive), PCR < 0.7 as call-heavy (resistive).
+Use the OI walls as the real support/resistance, and max pain as the expiry magnet.""")
 
         data_parts.append(f"""TRADING RULES (from knowledge base):
 {rag_context[:600]}""")

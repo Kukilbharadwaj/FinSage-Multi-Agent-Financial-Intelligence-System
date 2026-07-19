@@ -1,11 +1,19 @@
 # tools/yahoo_tool.py
-# yfinance wrapper for stock data, company profiles, mutual funds, and historical OHLCV.
-# This is the fallback when NSE scraper fails, and the primary source for historical data.
+# yfinance wrapper for stock data, company profiles, and historical OHLCV.
+#
+# Role: NSE (tools/nse_tool.py) is the primary source for live quotes and the
+# option chain. Yahoo covers what NSE does not expose — trailing fundamentals
+# (ROE, debt/equity, margins, beta) and historical OHLCV for technicals — and
+# acts as the fallback when NSE is unreachable.
+
+import threading
+import time
+from datetime import datetime, timedelta
+from datetime import time as dt_time
+from typing import Optional
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
-from typing import Optional
-from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
 
 
 # Maps common Indian stock/index names to Yahoo Finance symbols
@@ -98,6 +106,31 @@ def _resolve_symbol(symbol: str) -> str:
     return f"{symbol}.NS"
 
 
+# ── ticker.info cache ────────────────────────────────────────
+# ticker.info is a network round trip that can take 5s for indices, and the
+# market agent asks for it twice (quote + company profile) on a single query.
+# A short TTL keeps quotes fresh while collapsing duplicate fetches.
+_INFO_CACHE: dict = {}
+_INFO_TTL_SECONDS = 60
+_INFO_LOCK = threading.Lock()
+
+
+def _cached_info(yahoo_symbol: str) -> dict:
+    """Return ticker.info, reusing a recent result when one is available."""
+    now = time.time()
+
+    with _INFO_LOCK:
+        entry = _INFO_CACHE.get(yahoo_symbol)
+        if entry and (now - entry[0]) < _INFO_TTL_SECONDS:
+            return entry[1]
+
+    info = yf.Ticker(yahoo_symbol).info or {}
+
+    with _INFO_LOCK:
+        _INFO_CACHE[yahoo_symbol] = (now, info)
+    return info
+
+
 def get_stock_data(symbol: str) -> dict:
     """
     Fetch current stock/index data from Yahoo Finance.
@@ -106,8 +139,7 @@ def get_stock_data(symbol: str) -> dict:
     """
     try:
         yahoo_symbol = _resolve_symbol(symbol)
-        ticker = yf.Ticker(yahoo_symbol)
-        info = ticker.info
+        info = _cached_info(yahoo_symbol)
 
         # Get current price — try multiple fields
         price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose", 0)
@@ -151,8 +183,7 @@ def get_company_profile(symbol: str) -> dict:
     """
     try:
         yahoo_symbol = _resolve_symbol(symbol)
-        ticker = yf.Ticker(yahoo_symbol)
-        info = ticker.info
+        info = _cached_info(yahoo_symbol)
 
         return {
             "symbol": symbol.upper(),
@@ -218,18 +249,34 @@ def get_intraday_data(symbol: str) -> dict:
         candle_delay_minutes = max(0, int((now_ist - last_candle_ist.to_pydatetime()).total_seconds() // 60))
         is_live_data = bool(market_status.get("is_open")) and candle_delay_minutes <= 20
 
+        # We pull 5 days so there is always data on holidays/weekends, but the
+        # day high/low/VWAP must describe the LATEST SESSION only — computing
+        # them across the whole 5-day window reported a 5-day range as "day
+        # high", which fed wrong intraday levels to the trading agent.
+        session_df = df[df.index.date == df.index[-1].date()]
+        if session_df.empty:
+            session_df = df
+
+        session_volume = float(session_df["Volume"].sum())
+        vwap = (
+            round(float((session_df["Close"] * session_df["Volume"]).sum() / session_volume), 2)
+            if session_volume > 0
+            else round(float(session_df["Close"].mean()), 2)
+        )
+
         return {
-            "close": df["Close"].tolist(),
-            "high": df["High"].tolist(),
-            "low": df["Low"].tolist(),
-            "volume": df["Volume"].tolist(),
-            "dates": [d.strftime("%Y-%m-%d %H:%M") for d in df.index],
+            "close": session_df["Close"].tolist(),
+            "high": session_df["High"].tolist(),
+            "low": session_df["Low"].tolist(),
+            "volume": session_df["Volume"].tolist(),
+            "dates": [d.strftime("%Y-%m-%d %H:%M") for d in session_df.index],
             "interval": "5m",
-            "last_price": round(float(df["Close"].iloc[-1]), 2),
-            "day_high": round(float(df["High"].max()), 2),
-            "day_low": round(float(df["Low"].min()), 2),
-            "total_volume": int(df["Volume"].sum()),
-            "vwap": round(float((df["Close"] * df["Volume"]).sum() / df["Volume"].sum()), 2) if df["Volume"].sum() > 0 else 0,
+            "session_date": str(session_df.index[-1].date()),
+            "last_price": round(float(session_df["Close"].iloc[-1]), 2),
+            "day_high": round(float(session_df["High"].max()), 2),
+            "day_low": round(float(session_df["Low"].min()), 2),
+            "total_volume": int(session_volume),
+            "vwap": vwap,
             "last_candle_time_ist": last_candle_ist.strftime("%Y-%m-%d %H:%M"),
             "candle_delay_minutes": candle_delay_minutes,
             "is_live_data": is_live_data,
@@ -242,80 +289,17 @@ def get_intraday_data(symbol: str) -> dict:
 
 def get_options_chain(symbol: str) -> dict:
     """
-    Fetch options chain data from Yahoo Finance.
-    Returns calls and puts for the nearest expiry.
+    Fetch an option chain — delegated to NSE.
+
+    Yahoo Finance carries NO options data for Indian symbols: ticker.options
+    returns an empty tuple for ^NSEI, ^NSEBANK, RELIANCE.NS and every other
+    .NS ticker. The previous implementation here therefore always produced an
+    empty chain, which is why the trading agent could never answer an options
+    question. NSE's own option-chain API is the only working source.
     """
-    try:
-        yahoo_symbol = _resolve_symbol(symbol)
-        ticker = yf.Ticker(yahoo_symbol)
+    from tools.nse_tool import get_nse_option_chain
 
-        # Get available expiry dates
-        expiry_dates = ticker.options
-        if not expiry_dates:
-            return {"error": "No options data available for this symbol"}
-
-        # Get nearest expiry
-        nearest_expiry = expiry_dates[0]
-        opt_chain = ticker.option_chain(nearest_expiry)
-
-        # Current stock price for ATM detection
-        info = ticker.info
-        current_price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
-
-        # Process calls — top 10 by volume near ATM
-        calls_df = opt_chain.calls
-        calls_df = calls_df.sort_values("volume", ascending=False).head(15)
-        calls = []
-        for _, row in calls_df.iterrows():
-            calls.append({
-                "strike": float(row.get("strike", 0)),
-                "lastPrice": float(row.get("lastPrice", 0)),
-                "bid": float(row.get("bid", 0)),
-                "ask": float(row.get("ask", 0)),
-                "volume": int(row.get("volume", 0)) if row.get("volume") else 0,
-                "openInterest": int(row.get("openInterest", 0)) if row.get("openInterest") else 0,
-                "impliedVolatility": round(float(row.get("impliedVolatility", 0)) * 100, 2),
-            })
-
-        # Process puts — top 10 by volume near ATM
-        puts_df = opt_chain.puts
-        puts_df = puts_df.sort_values("volume", ascending=False).head(15)
-        puts = []
-        for _, row in puts_df.iterrows():
-            puts.append({
-                "strike": float(row.get("strike", 0)),
-                "lastPrice": float(row.get("lastPrice", 0)),
-                "bid": float(row.get("bid", 0)),
-                "ask": float(row.get("ask", 0)),
-                "volume": int(row.get("volume", 0)) if row.get("volume") else 0,
-                "openInterest": int(row.get("openInterest", 0)) if row.get("openInterest") else 0,
-                "impliedVolatility": round(float(row.get("impliedVolatility", 0)) * 100, 2),
-            })
-
-        # Calculate Put-Call Ratio from full chain
-        total_call_oi = int(opt_chain.calls["openInterest"].sum()) if "openInterest" in opt_chain.calls else 0
-        total_put_oi = int(opt_chain.puts["openInterest"].sum()) if "openInterest" in opt_chain.puts else 0
-        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 0
-
-        # Max Pain calculation (simplified)
-        max_pain = _calculate_max_pain(opt_chain, current_price)
-
-        return {
-            "symbol": symbol.upper(),
-            "expiry": nearest_expiry,
-            "current_price": current_price,
-            "calls": calls,
-            "puts": puts,
-            "pcr": pcr,
-            "total_call_oi": total_call_oi,
-            "total_put_oi": total_put_oi,
-            "max_pain": max_pain,
-            "available_expiries": list(expiry_dates[:5]),
-            "source": "Yahoo Finance",
-        }
-
-    except Exception as e:
-        raise Exception(f"Yahoo Finance options error for '{symbol}': {str(e)}")
+    return get_nse_option_chain(symbol)
 
 
 def get_ohlcv(symbol: str, period: str = "3mo") -> dict:
@@ -354,8 +338,8 @@ def get_indian_market_status(now_ist: Optional[datetime] = None) -> dict:
     else:
         now = now.astimezone(tz)
 
-    market_open_time = time(9, 15)
-    market_close_time = time(15, 30)
+    market_open_time = dt_time(9, 15)
+    market_close_time = dt_time(15, 30)
 
     is_weekday = now.weekday() < 5
     is_open_time = market_open_time <= now.time() <= market_close_time
@@ -412,36 +396,3 @@ def _format_indian_number(num) -> str:
         return "N/A"
     except (ValueError, TypeError):
         return "N/A"
-
-
-def _calculate_max_pain(opt_chain, current_price: float) -> float:
-    """Calculate max pain strike price (simplified)."""
-    try:
-        calls = opt_chain.calls
-        puts = opt_chain.puts
-        strikes = sorted(set(calls["strike"].tolist() + puts["strike"].tolist()))
-
-        if not strikes:
-            return current_price
-
-        min_pain = float("inf")
-        max_pain_strike = current_price
-
-        for strike in strikes:
-            total_pain = 0
-            # Pain for call writers
-            for _, row in calls.iterrows():
-                if strike > row["strike"]:
-                    total_pain += (strike - row["strike"]) * (row.get("openInterest") or 0)
-            # Pain for put writers
-            for _, row in puts.iterrows():
-                if strike < row["strike"]:
-                    total_pain += (row["strike"] - strike) * (row.get("openInterest") or 0)
-
-            if total_pain < min_pain:
-                min_pain = total_pain
-                max_pain_strike = strike
-
-        return round(float(max_pain_strike), 2)
-    except Exception:
-        return round(current_price, 2)
