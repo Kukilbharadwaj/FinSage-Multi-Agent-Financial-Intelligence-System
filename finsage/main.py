@@ -107,4 +107,10 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    # Render (and most PaaS hosts) assign the port at runtime and expect the
+    # process to bind exactly that one — a hardcoded 8000 fails their port scan
+    # and the deploy is marked unhealthy. Locally PORT is unset and this stays
+    # 8000, so nothing changes for development.
+    port = int(os.environ.get("PORT", "8000"))
+
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

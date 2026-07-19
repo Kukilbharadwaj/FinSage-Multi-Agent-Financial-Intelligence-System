@@ -15,7 +15,11 @@ mcp>=1.2.0
 nemoguardrails>=0.11.0
 
 # Observability
-langfuse>=3.0.0
+# v4 floor is required, not cosmetic: observability.py and llm.py call
+# start_observation(as_type=...) and propagate_attributes(), neither of which
+# exists in v3. On v3 every call would fail into its except branch and tracing
+# would silently no-op again — exactly the bug this project already hit once.
+langfuse>=4.0.0,<5.0.0
 
 # Market data
 yfinance>=0.2.40

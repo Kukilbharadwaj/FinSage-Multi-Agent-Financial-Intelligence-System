@@ -1,0 +1,121 @@
+# render.yaml — Render Blueprint for FinSage AI
+#
+# This file must sit at the REPOSITORY ROOT. The application lives one level
+# down in finsage/, which is what `rootDir` below points at — build and start
+# commands run from inside that directory.
+#
+# Deploy:  Render Dashboard -> New -> Blueprint -> pick this repo.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# SECRETS ARE NOT IN THIS FILE, BY DESIGN.
+#
+# Every credential is declared with `sync: false`, which tells Render to
+# prompt for the value in the dashboard on first deploy and then keep it
+# encrypted. This file is committed to git, so a real key written here would
+# be published. Values to paste come from finsage/.env — see the README's
+# "Deploying to Render" table for the exact list.
+# ─────────────────────────────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: finsage
+    runtime: python
+    plan: free
+
+    # Singapore is the closest free region to NSE, AMFI and the Indian market
+    # feeds this app polls on nearly every query. If your account cannot place
+    # a free instance here, change to: oregon
+    region: singapore
+
+    # The repo root holds README.md and this file; the app is in finsage/.
+    rootDir: finsage
+
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+
+    # Bind the port Render assigns — see the PORT note in main.py.
+    #
+    # One worker is deliberate. The free instance has 512 MB of RAM and this
+    # process already loads pandas, numpy, langchain and nemoguardrails; a
+    # second worker duplicates all of it and gets the container OOM-killed.
+    # Concurrency inside a request is already handled by the parallel stage
+    # ThreadPoolExecutor in agents/graph.py, not by extra workers.
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+
+    # /api/health is safe to poll: it catches its own exceptions and always
+    # returns 200, so a Pinecone or NeMo hiccup degrades the reported status
+    # instead of failing the deploy.
+    healthCheckPath: /api/health
+
+    autoDeployTrigger: commit
+
+    envVars:
+      # ── Runtime ──────────────────────────────────────────────────
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+
+      # Without this, Python block-buffers stdout when it is a pipe and the
+      # startup banner ("[OK] Langfuse telemetry active", MCP and RAG warmup
+      # lines) never reaches the Render log until the buffer fills or the
+      # process dies — which makes a healthy boot look like a hung one.
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+      # ── Secrets: set these in the Render dashboard ───────────────
+      - key: GROQ_API_KEY
+        sync: false
+      - key: HUGGINGFACE_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+
+      # ── Telemetry ────────────────────────────────────────────────
+      # Region-specific. These keys belong to the US project, and pointing at
+      # the wrong region still authenticates but records nothing.
+      # observability.py accepts LANGFUSE_BASE_URL as an alias for the SDK's
+      # LANGFUSE_HOST, which is the name used in finsage/.env.
+      - key: LANGFUSE_BASE_URL
+        value: https://us.cloud.langfuse.com
+
+      # ── Vector store ─────────────────────────────────────────────
+      # Pinecone is external and already populated, so the free instance
+      # carries no index and no embedding model of its own.
+      - key: PINECONE_INDEX_NAME
+        value: finsage
+      - key: PINECONE_NAMESPACE
+        value: default
+      - key: PINECONE_CLOUD
+        value: aws
+      - key: PINECONE_REGION
+        value: us-east-1
+
+      # ── Embeddings (Hugging Face Inference API) ──────────────────
+      # EMBEDDING_DIM must match the Pinecone index dimension exactly.
+      - key: EMBEDDING_MODEL
+        value: sentence-transformers/all-MiniLM-L6-v2
+      - key: EMBEDDING_DIM
+        value: "384"
+      - key: EMBEDDING_TIMEOUT_SECONDS
+        value: "30"
+      - key: EMBEDDING_MAX_RETRIES
+        value: "3"
+      - key: EMBEDDING_BATCH_SIZE
+        value: "32"
+
+      # ── MCP (in-process, no second service) ──────────────────────
+      - key: MCP_ENABLED
+        value: "true"
+      - key: MCP_TIMEOUT_SECONDS
+        value: "20"
+
+      # ── Groq call budget ─────────────────────────────────────────
+      # Read by llm.py. A free instance shares CPU and cold-starts often, so
+      # the ceiling is a little above the local default to avoid tripping the
+      # timeout on the first request after a spin-up.
+      - key: GROQ_TIMEOUT_SECONDS
+        value: "25"
+      - key: GROQ_MAX_RETRIES
+        value: "1"
