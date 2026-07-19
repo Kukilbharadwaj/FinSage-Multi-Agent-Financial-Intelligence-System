@@ -7,7 +7,7 @@
 # Writes: state["mf_analysis"]
 # Uses: RAG Agent (on-demand) for MF rules
 
-from groq import Groq
+from llm import Groq
 from config.settings import settings
 from config.models import GROQ_REASONING
 from mcp_bridge import call_mcp_tool, is_mcp_enabled
@@ -150,14 +150,21 @@ Be specific with numbers. This is for educational purposes only."""
             client = Groq(api_key=settings.GROQ_API_KEY)
 
             response = client.chat.completions.create(
+                name="mutual_fund_llm",
                 model=GROQ_REASONING,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.5,
-                max_tokens=2000,
+                # Hidden chain-of-thought is billed as completion tokens, so at
+                # the old cap of 2000 the reasoning consumed most of the budget
+                # and every call came back finish_reason="length" — truncated
+                # mid-sentence. effort="low" leaves ~1500 visible chars in half
+                # the time, and synthesis only reads the first 1100 of them.
+                max_tokens=1200,
                 reasoning_format="hidden",
+                reasoning_effort="low",
             )
 
             analysis_text = response.choices[0].message.content.strip()

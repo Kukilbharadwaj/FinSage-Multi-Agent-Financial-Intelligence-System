@@ -6,7 +6,7 @@
 # Writes: state["tax_analysis"] (read by mutual_fund_agent)
 # Uses: RAG Agent (on-demand) for tax rules
 
-from groq import Groq
+from llm import Groq
 from config.settings import settings
 from config.models import GROQ_REASONING
 from agents.rag_agent import retrieve_for_agent
@@ -98,6 +98,7 @@ At the end, provide a JSON block:
             client = Groq(api_key=settings.GROQ_API_KEY)
 
             response = client.chat.completions.create(
+                name="tax_llm",
                 model=GROQ_REASONING,
                 messages=[
                     {"role": "system", "content": system_message},

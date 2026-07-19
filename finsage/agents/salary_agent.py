@@ -7,7 +7,7 @@
 # Uses: RAG Agent (on-demand) for financial planning rules
 
 import json
-from groq import Groq
+from llm import Groq
 from config.settings import settings
 from config.models import GROQ_STANDARD
 from agents.rag_agent import retrieve_for_agent
@@ -83,6 +83,7 @@ At the end, provide a JSON block with these estimates:
             client = Groq(api_key=settings.GROQ_API_KEY)
 
             response = client.chat.completions.create(
+                name="salary_llm",
                 model=GROQ_STANDARD,
                 messages=[
                     {"role": "system", "content": system_prompt},

@@ -1,6 +1,8 @@
 # api/routes.py
 # FastAPI router with /chat, /health, and /history endpoints.
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -11,7 +13,7 @@ from agents import memory
 from db.database import get_db
 from db.crud import save_query_log, get_recent_queries
 from mcp_bridge import has_live_session, get_tools
-from observability import get_callbacks, is_enabled as langfuse_enabled
+from observability import get_callbacks, is_enabled as langfuse_enabled, score, trace
 
 router = APIRouter()
 
@@ -103,30 +105,53 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         # Set up Langfuse telemetry callback (empty list when disabled)
         callbacks = get_callbacks()
 
-        # Run the full agent graph
-        result = app_graph.invoke(
-            initial_state,
-            config={
-                "callbacks": callbacks,
-                "run_name": "finsage_query",
-                "metadata": {
-                    "langfuse_user_id": request.user_id,
-                    "langfuse_session_id": request.user_id,
-                    "langfuse_tags": ["finsage", "chat"],
+        # Own the root span so user_id/session_id land on the trace itself and
+        # so there is a trace_id to hang scores off once the run completes.
+        with trace(
+            name="finsage_query",
+            user_id=request.user_id,
+            session_id=request.user_id,
+            tags=["finsage", "chat"],
+            input=request.query.strip(),
+        ) as trace_id:
+            started = time.perf_counter()
+
+            # Run the full agent graph
+            result = app_graph.invoke(
+                initial_state,
+                config={
+                    "callbacks": callbacks,
+                    "run_name": "finsage_graph",
+                    "metadata": {
+                        "langfuse_user_id": request.user_id,
+                        "langfuse_session_id": request.user_id,
+                        "langfuse_tags": ["finsage", "chat"],
+                    },
                 },
-            },
-        )
+            )
+
+            elapsed = time.perf_counter() - started
 
         # Extract results
         recommendation = result.get("recommendation", "No recommendation generated.")
         confidence = result.get("confidence", 0)
         intent = result.get("intent", "general")
-        trace = result.get("trace", [])
+        agent_trace = result.get("trace", [])
+
+        # ── Scores: the pipeline already grades itself, so publish it ──
+        # Langfuse expects numeric scores in 0–1, hence the /100.
+        review = result.get("review_output") or {}
+        score(trace_id, "confidence", (confidence or 0) / 100,
+              comment=f"intent={intent}")
+        score(trace_id, "review_approved", 1 if review.get("approved", True) else 0,
+              comment="; ".join(review.get("issues", [])[:3]))
+        score(trace_id, "latency_seconds", round(elapsed, 3),
+              comment=f"agents={','.join(result.get('selected_agents', []))}")
 
         # Add execution plan to trace for transparency
         plan = result.get("execution_plan", [])
         if plan:
-            trace = [f"📋 Plan: {' → '.join(plan[:6])}"] + trace
+            agent_trace = [f"📋 Plan: {' → '.join(plan[:6])}"] + agent_trace
 
         # Record the turn so the next message in this session can refer to it.
         memory.remember(
@@ -153,7 +178,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
             answer=recommendation,
             confidence=confidence or 0,
             intent=intent,
-            trace=trace,
+            trace=agent_trace,
         )
 
     except Exception as e:

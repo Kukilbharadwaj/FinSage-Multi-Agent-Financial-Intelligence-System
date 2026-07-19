@@ -6,7 +6,7 @@
 # Does NOT use RAG.
 # Writes: state["technical_analysis"]
 
-from groq import Groq
+from llm import Groq
 from config.settings import settings
 from config.models import GROQ_REASONING
 from tools.yahoo_tool import get_ohlcv
@@ -114,14 +114,18 @@ Be specific with numbers. Use ₹ symbol for prices. Keep your analysis practica
             client = Groq(api_key=settings.GROQ_API_KEY)
 
             response = client.chat.completions.create(
+                name="technical_llm",
                 model=GROQ_REASONING,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.6,
-                max_tokens=1500,
+                # See mutual_fund_agent: hidden reasoning ate the budget before
+                # emitting visible text. Synthesis reads 700 chars of this one.
+                max_tokens=1200,
                 reasoning_format="hidden",
+                reasoning_effort="low",
             )
 
             analysis_text = response.choices[0].message.content.strip()

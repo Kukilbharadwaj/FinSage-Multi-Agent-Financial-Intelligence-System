@@ -11,7 +11,7 @@
 # The graph's stage dispatcher handles execution order.
 
 import json
-from groq import Groq
+from llm import Groq
 from config.settings import settings
 from config.models import GROQ_FAST
 from agents.memory import format_history
@@ -97,6 +97,7 @@ Respond ONLY with valid JSON in this exact format, nothing else:
         )
 
         response = client.chat.completions.create(
+            name="supervisor_llm",
             model=GROQ_FAST,
             messages=[
                 {"role": "system", "content": system_prompt},

@@ -83,7 +83,51 @@ AGENT_OUTPUT_KEY = {
 
 # One agent can take ~10s on a slow upstream API; without a ceiling a single
 # hung tool call would stall the whole request.
-_AGENT_TIMEOUT_SECONDS = 45
+#
+# Was 45s, which is exactly the ~45s p99 the Langfuse latency panel reported:
+# the tail was not slow work, it was one stalled agent holding the stage open
+# until this deadline expired. Groq calls now carry their own 20s timeout
+# (llm.py) and the tools cap out around 12s, so a healthy agent finishes well
+# inside 25s. Anything past that is a stall worth abandoning — the stage keeps
+# whatever the other agents produced rather than making the user wait.
+_AGENT_TIMEOUT_SECONDS = 25
+
+
+# ── OpenTelemetry context propagation ─────────────────────────────
+# Wrapped in helpers so the graph still runs when opentelemetry is absent.
+
+def _capture_otel_context():
+    """Snapshot the current OTEL context, or None when unavailable."""
+    try:
+        from opentelemetry import context as otel_context
+
+        return otel_context.get_current()
+    except Exception:
+        return None
+
+
+def _attach_otel_context(parent_context):
+    """Make `parent_context` current in this thread; returns a detach token."""
+    if parent_context is None:
+        return None
+    try:
+        from opentelemetry import context as otel_context
+
+        return otel_context.attach(parent_context)
+    except Exception:
+        return None
+
+
+def _detach_otel_context(token) -> None:
+    """Restore the thread's previous OTEL context."""
+    if token is None:
+        return
+    try:
+        from opentelemetry import context as otel_context
+
+        otel_context.detach(token)
+    except Exception:
+        pass
 
 
 def _run_stage(state: dict, stage_num: int) -> dict:
@@ -113,11 +157,22 @@ def _run_stage(state: dict, stage_num: int) -> dict:
             state["trace"].append(f"stage_{stage_num} → ERROR running {name}: {str(e)[:100]}")
             return state
 
+    # Langfuse v3+ traces through OpenTelemetry, whose context is thread-local
+    # and does NOT follow a task into a worker thread. Without carrying it
+    # across, every generation made by a parallel agent starts its own root
+    # trace instead of nesting under finsage_query — the stage would look empty
+    # in the dashboard while orphan traces piled up beside it.
+    parent_context = _capture_otel_context()
+
     def _invoke(agent_name: str) -> tuple:
-        branch = copy.copy(state)
-        branch["trace"] = []          # collect this agent's trace separately
-        branch["rag_context"] = copy.deepcopy(state.get("rag_context"))
-        return agent_name, AGENT_REGISTRY[agent_name](branch)
+        token = _attach_otel_context(parent_context)
+        try:
+            branch = copy.copy(state)
+            branch["trace"] = []      # collect this agent's trace separately
+            branch["rag_context"] = copy.deepcopy(state.get("rag_context"))
+            return agent_name, AGENT_REGISTRY[agent_name](branch)
+        finally:
+            _detach_otel_context(token)
 
     with ThreadPoolExecutor(max_workers=len(stage_agents)) as pool:
         futures = {pool.submit(_invoke, name): name for name in stage_agents}

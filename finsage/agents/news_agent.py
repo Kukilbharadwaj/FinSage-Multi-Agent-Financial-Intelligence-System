@@ -6,7 +6,7 @@
 # Writes: state["news_analysis"] (read by market_agent)
 
 import json
-from groq import Groq
+from llm import Groq
 from config.settings import settings
 from config.models import GROQ_FAST
 from tools.news_tool import get_news
@@ -67,6 +67,7 @@ Respond ONLY with valid JSON in this exact format, nothing else:
 {{"score": 0.0, "summary": "one line summary of overall market mood", "mood": "positive|negative|neutral", "key_events": "most important event from headlines"}}"""
 
             response = client.chat.completions.create(
+                name="news_sentiment_llm",
                 model=GROQ_FAST,
                 messages=[
                     {"role": "system", "content": "You are a financial news sentiment analyzer. Respond only with JSON."},

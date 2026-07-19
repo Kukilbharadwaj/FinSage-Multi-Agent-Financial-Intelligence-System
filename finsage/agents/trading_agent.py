@@ -7,7 +7,7 @@
 # Writes: state["trading_analysis_output"]
 # Uses: RAG Agent (on-demand) for trading rules
 
-from groq import Groq
+from llm import Groq
 from config.settings import settings
 from config.models import GROQ_REASONING
 from mcp_bridge import call_mcp_tool, is_mcp_enabled
@@ -264,14 +264,18 @@ Be specific with prices in ₹. This is for educational purposes only."""
             client = Groq(api_key=settings.GROQ_API_KEY)
 
             response = client.chat.completions.create(
+                name="trading_llm",
                 model=GROQ_REASONING,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.5,
-                max_tokens=2000,
+                # See mutual_fund_agent: hidden reasoning ate the 2000-token
+                # budget and truncated the answer. Synthesis reads 1100 chars.
+                max_tokens=1200,
                 reasoning_format="hidden",
+                reasoning_effort="low",
             )
 
             analysis_text = response.choices[0].message.content.strip()

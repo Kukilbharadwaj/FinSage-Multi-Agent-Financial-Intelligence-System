@@ -6,7 +6,7 @@
 # Writes: state["market_analysis"] (read by trading_agent, mutual_fund_agent)
 
 from datetime import datetime, timezone
-from groq import Groq
+from llm import Groq
 from config.settings import settings
 from config.models import GROQ_STANDARD
 from mcp_bridge import call_mcp_tool, is_mcp_enabled
@@ -167,6 +167,7 @@ Volatility: low/medium/high
 Timing: one sentence recommendation"""
 
             response = client.chat.completions.create(
+                name="market_llm",
                 model=GROQ_STANDARD,
                 messages=[
                     {"role": "system", "content": "You are a concise Indian market data analyst specializing in both price action and fundamental analysis."},

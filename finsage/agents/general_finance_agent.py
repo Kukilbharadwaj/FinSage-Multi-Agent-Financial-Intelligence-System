@@ -7,7 +7,7 @@
 # Writes: state["general_finance_result"] as structured dict
 # Uses: RAG Agent (on-demand) for domain-specific rules
 
-from groq import Groq
+from llm import Groq
 from config.settings import settings
 from config.models import GROQ_STANDARD
 from agents.rag_agent import retrieve_for_agent
@@ -66,6 +66,7 @@ Use ₹ symbol. Be specific with numbers. Show calculations where applicable."""
             client = Groq(api_key=settings.GROQ_API_KEY)
 
             response = client.chat.completions.create(
+                name="general_finance_llm",
                 model=GROQ_STANDARD,
                 messages=[
                     {"role": "system", "content": system_prompt},

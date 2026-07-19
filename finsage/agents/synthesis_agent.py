@@ -11,7 +11,7 @@
 # and an internal metric leaked into the prose. Confidence is now computed from
 # the review gate and returned as an API field instead of being written out.
 
-from groq import Groq
+from llm import Groq
 
 from agents.memory import format_history
 from config.models import GROQ_STANDARD
@@ -246,6 +246,7 @@ Write your answer to them now."""
         client = Groq(api_key=settings.GROQ_API_KEY)
 
         response = client.chat.completions.create(
+            name="synthesis_llm",
             model=GROQ_STANDARD,
             messages=[
                 {"role": "system", "content": system_prompt},
