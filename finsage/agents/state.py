@@ -23,6 +23,12 @@ class FinSageState(TypedDict):
     user_id: str                            # identifies the user session
     raw_query: str                          # the original user question unchanged
 
+    # ── Working memory ────────────────────────────────────────
+    # The session's previous turns (up to agents.memory.MAX_TURNS = 5), oldest
+    # first, each {query, answer, intent}. Read by the guardrail, supervisor and
+    # synthesis so follow-up questions resolve against what was already said.
+    conversation_history: list
+
     # ── Supervisor outputs ────────────────────────────────────
     goal: str                               # what the user wants (human-readable)
     intent: str                             # primary intent for backward compat with API

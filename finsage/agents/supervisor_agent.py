@@ -14,6 +14,8 @@ import json
 from groq import Groq
 from config.settings import settings
 from config.models import GROQ_FAST
+from agents.memory import format_history
+from agents.trading_agent import is_trading_query
 
 
 # All valid agent names the Supervisor can select
@@ -68,6 +70,11 @@ You must also extract entities:
 - "index": index name if mentioned (NIFTY 50, SENSEX, BANKNIFTY). null if none.
 - "fund_name": mutual fund name if mentioned. null if none.
 
+If earlier conversation is provided, treat the new question as a continuation:
+resolve pronouns and ellipsis against it ("what about 20 lakhs?" after a tax
+question is still a tax question), and carry forward any stock, fund or amount
+the user already named unless they clearly changed the subject.
+
 Respond ONLY with valid JSON in this exact format, nothing else:
 {
   "goal": "one sentence describing what the user wants",
@@ -80,11 +87,20 @@ Respond ONLY with valid JSON in this exact format, nothing else:
   ]
 }"""
 
+        # Replay the session so a bare follow-up ("and for 20 lakhs?") is
+        # planned against what it actually refers to.
+        transcript = format_history(state.get("conversation_history") or [], answer_chars=300)
+        user_content = (
+            f"Earlier in this conversation:\n{transcript}\n\nNew question: {state['raw_query']}"
+            if transcript
+            else state["raw_query"]
+        )
+
         response = client.chat.completions.create(
             model=GROQ_FAST,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": state["raw_query"]},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.0,
             max_tokens=500,
@@ -113,6 +129,17 @@ Respond ONLY with valid JSON in this exact format, nothing else:
         state["selected_agents"] = [
             a for a in selected if a in VALID_AGENTS
         ]
+
+        # An options/intraday question must reach the trading agent even when
+        # the LLM classified it as a plain "market" lookup — that agent is the
+        # only one that reports whether the session is open, and "max pain on
+        # a Sunday" answered without that context is actively misleading.
+        if is_trading_query(state["raw_query"]) and "trading" not in state["selected_agents"]:
+            state["selected_agents"].append("trading")
+            if "market" not in state["selected_agents"]:
+                state["selected_agents"].append("market")
+            if state["intent"] in ("market", "stock", "index", "general"):
+                state["intent"] = "trading"
 
         # Safety: if no valid agents selected, default based on intent
         if not state["selected_agents"]:
@@ -143,13 +170,24 @@ Respond ONLY with valid JSON in this exact format, nothing else:
     except (json.JSONDecodeError, Exception) as e:
         # Fallback: if Supervisor fails, default to general/news
         state["goal"] = state.get("raw_query", "")
-        state["intent"] = "general"
         state["entities"] = {}
-        state["selected_agents"] = ["news"]
-        state["execution_plan"] = [
-            "Fetch latest market news",
-            "Generate general response",
-        ]
+
+        # Even on the fallback path a trading question must reach the agent
+        # that knows the session hours.
+        if is_trading_query(state.get("raw_query", "")):
+            state["intent"] = "trading"
+            state["selected_agents"] = ["trading", "market"]
+            state["execution_plan"] = [
+                "Fetch market status and option chain",
+                "Generate trading analysis",
+            ]
+        else:
+            state["intent"] = "general"
+            state["selected_agents"] = ["news"]
+            state["execution_plan"] = [
+                "Fetch latest market news",
+                "Generate general response",
+            ]
         state["trace"].append(f"supervisor_agent → ERROR: {str(e)[:100]}, defaulting to news")
         return state
 

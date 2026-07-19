@@ -9,6 +9,11 @@ langchain-groq>=0.2.0
 fastmcp>=2.0.0
 mcp>=1.2.0
 
+# Guardrails — NVIDIA NeMo Guardrails runs the input/output rails defined in
+# guardrails/. The rails execute local Python actions rather than NeMo's stock
+# self_check_* prompts, so no LLM engine is configured for them.
+nemoguardrails>=0.11.0
+
 # Observability
 langfuse>=3.0.0
 
@@ -41,7 +46,6 @@ httpx>=0.27.0
 PyYAML>=6.0.0
 
 # Removed in v4:
-#   nemoguardrails  -> replaced by local checks in agents/guardrail.py
 #   faster-whisper  -> voice mode removed
 #   kokoro          -> voice mode removed
 #   soundfile       -> voice mode removed

@@ -345,17 +345,19 @@ def get_indian_market_status(now_ist: Optional[datetime] = None) -> dict:
     is_open_time = market_open_time <= now.time() <= market_close_time
     is_open = is_weekday and is_open_time
 
+    # `phase` is the machine-readable version of `reason` — the trading agent
+    # picks its wording from it, so the two can never drift apart.
     if is_open:
-        status = "open"
+        status, phase = "open", "open"
         reason = "Indian market session is live."
     elif not is_weekday:
-        status = "closed"
-        reason = "Weekend: Indian market is closed."
+        status, phase = "closed", "weekend"
+        reason = f"Weekend ({now.strftime('%A')}): Indian market is closed."
     elif now.time() < market_open_time:
-        status = "closed"
+        status, phase = "closed", "pre_market"
         reason = "Pre-market: session has not opened yet."
     else:
-        status = "closed"
+        status, phase = "closed", "post_market"
         reason = "Post-market: session has ended for the day."
 
     # Compute next open time (simple weekday logic, ignores exchange holidays).
@@ -373,10 +375,15 @@ def get_indian_market_status(now_ist: Optional[datetime] = None) -> dict:
     return {
         "is_open": is_open,
         "status": status,
+        "phase": phase,                       # open | weekend | pre_market | post_market
         "reason": reason,
         "timezone": "Asia/Kolkata",
+        "day_name": now.strftime("%A"),
+        "is_weekend": not is_weekday,
+        "session_hours_ist": "09:15 – 15:30 IST, Monday to Friday",
         "current_time_ist": now.strftime("%Y-%m-%d %H:%M"),
         "next_open_ist": next_open_dt.strftime("%Y-%m-%d %H:%M"),
+        "next_open_day": next_open_dt.strftime("%A"),
         "today_close_ist": next_close_dt.strftime("%Y-%m-%d %H:%M"),
     }
 

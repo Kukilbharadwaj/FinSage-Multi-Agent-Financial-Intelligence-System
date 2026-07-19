@@ -1,18 +1,23 @@
 # agents/guardrail.py
-# Minimal, local input/output guardrails — replaces NVIDIA NeMo Guardrails.
+# The FinSage guardrail POLICY.
 #
-# Why NeMo was removed:
-#   1. Latency. rails.generate_async() ran a FULL LLM generation for the input
-#      check and another for the output check. That was two extra round trips
-#      on every query, on top of the pipeline's own LLM calls.
+# This module decides; NVIDIA NeMo Guardrails enforces. The two functions here
+# (`classify` and `sanitize_output`) are registered as NeMo actions in
+# agents/nemo_rails.py and invoked from the Colang flows in guardrails/rails.co.
+# NeMo owns the control flow — stop the pipeline, rewrite the answer, carry
+# dialog state — while the actual judgement stays here as deterministic Python.
+#
+# Why the policy is Python instead of NeMo's stock self_check_* prompts:
+#   1. Latency. self_check_input and self_check_output each run a FULL LLM
+#      generation, adding two round trips to every single query.
 #   2. False positives. The self_check_input prompt classified ordinary
 #      conversational openers ("hi", "what can you do?") as non-financial and
 #      blocked them, so the assistant could not even introduce itself.
 #
-# The policy here is deliberately narrow, per the product requirement:
-# block ONLY hacking/abuse attempts and clearly off-topic requests. Everything
-# even loosely finance-adjacent is allowed through, and small talk is answered
-# warmly instead of being refused.
+# The policy is deliberately narrow, per the product requirement: block ONLY
+# hacking/abuse and prompt injection, plus requests that are clearly off-topic
+# with no financial angle at all. Everything even loosely finance-adjacent is
+# allowed through, and small talk is answered warmly instead of being refused.
 #
 # All checks are local string matching — zero network calls, microseconds.
 
@@ -31,13 +36,43 @@ _ABUSE_PATTERNS = [
 ]
 
 # ── Prompt injection / identity override ──────────────────────
+# Grouped by attack shape. These are checked before anything else, because an
+# injection dressed up in finance vocabulary is still an injection.
 _INJECTION_PATTERNS = [
-    r"ignore (all |your |the )?(previous|prior|above|earlier) (instruction|prompt|rule|direction)",
-    r"forget (your|all|the) (rules|instructions|training|guidelines|system prompt)",
-    r"(you are|act as|pretend to be) (now )?(a |an )?(general|unrestricted|uncensored|different) (assistant|ai|model)",
-    r"(reveal|show|print|repeat|output) (me )?(your|the) (system prompt|instructions|initial prompt)",
-    r"\b(dan mode|developer mode|jailbreak)\b",
-    r"override (your |the )?(safety|security|guideline|restriction)",
+    # Instruction override
+    r"\b(ignore|disregard|forget|discard|override)\b.{0,30}\b(previous|prior|above|earlier|initial|all|your|the)\b.{0,20}\b(instruction|prompt|rule|direction|guideline|context|constraint)",
+    r"forget (your|all|the|everything) (rules|instructions|training|guidelines|system prompt|you were told)",
+    r"\b(do not|don'?t|no longer) (follow|obey|apply|respect)\b.{0,25}\b(rule|instruction|guideline|restriction|policy)",
+    r"\bnew (instructions?|rules?|system prompt)\s*[:\-]",
+    r"\b(stop|halt)\b.{0,15}\bnew (instruction|rule|task)",
+
+    # Identity / persona override
+    r"(you are|act as|pretend to be|behave like|roleplay as|simulate)\b.{0,30}\b(unrestricted|uncensored|unfiltered|unlimited|no[- ]restriction|without (any )?(rule|restriction|filter|guideline))",
+    r"(you are|act as|pretend to be|behave like) (now )?(a |an )?(general|different|generic) (assistant|ai|model|chatbot)",
+    r"\bfrom now on,? you (are|will|must|should)\b",
+    r"\byou are no longer\b.{0,20}\b(finsage|a finance|restricted|bound)",
+    r"\b(enable|activate|switch to)\b.{0,20}\b(dev|developer|debug|god|admin|root) mode\b",
+    r"\b(dan mode|developer mode|jailbreak|do anything now)\b",
+
+    # System-prompt extraction
+    r"(reveal|show|print|repeat|output|display|tell me|give me|what is|what'?s)\b.{0,25}\b(system prompt|initial prompt|original instruction|your instructions|your rules|your prompt)",
+    r"\b(repeat|print|output)\b.{0,20}\b(everything|the text|all text)\b.{0,15}\babove\b",
+    r"\bverbatim\b.{0,25}\b(prompt|instruction)",
+
+    # Fake role / delimiter injection
+    r"^\s*(system|assistant|developer)\s*[:>]",
+    r"<\|?(im_start|im_end|system|endoftext)\|?>",
+    r"\[\s*(system|inst|/inst)\s*\]",
+    r"###\s*(system|instruction)",
+
+    # Safety-control tampering
+    r"override (your |the )?(safety|security|guideline|restriction|guardrail|filter)",
+    r"\b(disable|turn off|remove|bypass)\b.{0,20}\b(safety|guardrail|filter|restriction|censor|moderation)",
+    r"\bwithout\b.{0,15}\b(disclaimer|warning|restriction|filter)\b.{0,20}\b(answer|respond|reply)",
+
+    # Obfuscation / indirect execution
+    r"\b(decode|base64|rot13|reverse)\b.{0,25}\b(and (then )?(execute|follow|do|run|obey))",
+    r"\b(execute|run|obey)\b.{0,20}\bthe following\b.{0,20}\b(instruction|command|prompt)",
 ]
 
 # ── Clearly off-topic requests ────────────────────────────────
@@ -99,9 +134,36 @@ def _has_finance_term(text: str) -> bool:
     return any(term in lowered for term in _FINANCE_TERMS)
 
 
-def classify(query: str) -> dict:
+def _history_has_finance(history: list) -> bool:
     """
-    Classify a user query locally.
+    True when the recent conversation was already about money.
+
+    Follow-ups lean on context — "and for my wife?" or "what about 20 lakhs"
+    carry no finance vocabulary of their own. Judging those in isolation
+    mislabels them, so an ongoing financial thread counts as finance context.
+    """
+    if not history:
+        return False
+
+    recent = " ".join(
+        f"{turn.get('query', '')} {turn.get('answer', '')}"
+        for turn in history[-3:]
+        if isinstance(turn, dict)
+    )
+    return _has_finance_term(recent)
+
+
+def classify(query: str, history: list = None) -> dict:
+    """
+    Classify a user query.
+
+    Registered as the `finsage_input_check` NeMo action and invoked from the
+    "finsage input policy" flow in guardrails/rails.co.
+
+    Args:
+        query:   the raw user message.
+        history: recent conversation turns, each {"query": ..., "answer": ...}.
+                 Used only to give follow-up questions the benefit of context.
 
     Returns {"action": ..., "reason": ..., "reply": ...} where action is one of:
         "allow"     — run the full agent pipeline
@@ -109,6 +171,7 @@ def classify(query: str) -> dict:
         "block"     — refuse with `reply`, skip the pipeline
     """
     text = (query or "").strip()
+    in_finance_thread = _history_has_finance(history)
 
     if not text:
         return {"action": "block", "reason": "empty query", "reply": "Could you type your question? I'm ready when you are."}
@@ -158,8 +221,9 @@ def classify(query: str) -> dict:
             "reply": "Happy to help! Anything else on your mind — investments, tax, or your monthly budget?",
         }
 
-    # 3. Off-topic, but only when there is no finance angle at all.
-    if _matches(text, _OFF_TOPIC_PATTERNS) and not _has_finance_term(text):
+    # 3. Off-topic, but only when there is no finance angle at all — not in the
+    #    message, and not in the thread it continues.
+    if _matches(text, _OFF_TOPIC_PATTERNS) and not _has_finance_term(text) and not in_finance_thread:
         return {
             "action": "block",
             "reason": "off-topic",
@@ -227,9 +291,15 @@ _DISCLAIMER_MARKERS = ("sebi", "educational", "not registered", "consult a quali
 
 def sanitize_output(text: str) -> tuple:
     """
-    Clean the final answer locally.
+    Clean the final answer.
 
-    Softens certainty language and guarantees a disclaimer is present.
+    Registered as the `finsage_output_check` NeMo action and invoked from the
+    "finsage output policy" flow in guardrails/rails.co.
+
+    Softens certainty language and guarantees a disclaimer is present. This
+    rewrites rather than blocks — a refused answer helps nobody, a reworded one
+    still answers the question within compliance.
+
     Returns (cleaned_text, was_modified).
     """
     if not text or not text.strip():

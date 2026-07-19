@@ -14,6 +14,78 @@ from mcp_bridge import call_mcp_tool, is_mcp_enabled
 from tools.yahoo_tool import get_intraday_data, get_options_chain, get_indian_market_status
 from agents.rag_agent import retrieve_for_agent
 
+# Vocabulary that makes a question an options/intraday question. Shared with
+# the supervisor: whichever agents it picks, a query containing any of these
+# must route here, because this is the only agent that reports market timing.
+TRADING_KEYWORDS = (
+    "option", "call", "put", "f&o", "fno", "strike", "premium",
+    "straddle", "strangle", "iron condor", "nifty option",
+    "banknifty option", "pcr", "max pain", "oi", "open interest",
+    "intraday", "scalp", "expiry", "futures", "swing trade",
+)
+
+
+def is_trading_query(text: str) -> bool:
+    """True when the question is about options / intraday / F&O."""
+    return any(kw in (text or "").lower() for kw in TRADING_KEYWORDS)
+
+
+def build_market_notice(market_status: dict) -> str:
+    """
+    Build the market-timing line that every trading answer opens with.
+
+    This is assembled in Python, not asked of the LLM. Whether the NSE is open
+    is a fact about the clock, and a model that "usually" mentions it is the
+    wrong tool — a trader reading a live entry trigger at 4pm on a Saturday
+    needs to be told the session is closed every single time, not most times.
+
+    The question still gets answered; the notice only frames when it applies.
+    """
+    phase = market_status.get("phase")
+    now_ist = market_status.get("current_time_ist", "")
+    next_open = market_status.get("next_open_ist", "")
+    next_open_day = market_status.get("next_open_day", "")
+    day_name = market_status.get("day_name", "")
+    hours = market_status.get("session_hours_ist", "09:15 – 15:30 IST, Monday to Friday")
+
+    if phase == "open":
+        return (
+            f"🟢 **Market is OPEN** — {now_ist} IST ({day_name}). "
+            f"Session runs {hours}, so today's close is at "
+            f"{market_status.get('today_close_ist', '15:30')}."
+        )
+
+    if phase == "weekend":
+        return (
+            f"🔴 **Market is CLOSED — it's {day_name}.** NSE and BSE don't trade on "
+            f"Saturdays or Sundays. Regular session is {hours}. "
+            f"Next open: {next_open_day} {next_open} IST. "
+            f"Option chain and price data below are from the last trading session, "
+            f"so treat everything as preparation for the next session, not a live call."
+        )
+
+    if phase == "pre_market":
+        return (
+            f"🟡 **Market hasn't opened yet** — {now_ist} IST ({day_name}). "
+            f"Trading starts at 09:15 IST ({hours}). "
+            f"Levels below are from the previous close — wait for the open to confirm them."
+        )
+
+    if phase == "post_market":
+        return (
+            f"🔴 **Market is CLOSED for today** — it's {now_ist} IST ({day_name}), "
+            f"and the session ended at 15:30. Regular hours are {hours}. "
+            f"Next open: {next_open_day} {next_open} IST. "
+            f"The analysis below still stands, but treat it as a plan for the next "
+            f"session rather than something to act on right now."
+        )
+
+    # Unknown phase — say so rather than implying the market is tradeable.
+    return (
+        f"⚠️ **Market status could not be confirmed.** NSE trades {hours}. "
+        f"Check your broker terminal before acting on anything below."
+    )
+
 
 def run(state: dict) -> dict:
     """
@@ -55,11 +127,7 @@ def run(state: dict) -> dict:
 
         # Fetch options chain if query is about options/F&O
         options_data = {}
-        is_options_query = any(kw in raw_query for kw in [
-            "option", "call", "put", "f&o", "strike", "premium",
-            "straddle", "strangle", "iron condor", "nifty option",
-            "banknifty option", "pcr", "max pain", "oi", "open interest"
-        ])
+        is_options_query = is_trading_query(raw_query)
 
         if is_options_query:
             try:
@@ -72,6 +140,7 @@ def run(state: dict) -> dict:
 
         market_status = (intraday or {}).get("market_status") or get_indian_market_status()
         is_market_open = bool(market_status.get("is_open"))
+        market_notice = build_market_notice(market_status)
 
         # Build analysis prompt
         system_message = """You are an expert Indian intraday and options analyst.
@@ -99,11 +168,14 @@ def run(state: dict) -> dict:
     - Candle Delay: {intraday.get('candle_delay_minutes', 'N/A')} minutes
     - Live Data: {intraday.get('is_live_data', False)}""")
 
-        data_parts.append(f"""MARKET STATUS (IST):
+        data_parts.append(f"""MARKET STATUS (IST) — this is ground truth, do not contradict it:
     - Status: {market_status.get('status', 'unknown').upper()}
     - Is Open: {is_market_open}
+    - Phase: {market_status.get('phase', 'unknown')}
+    - Today: {market_status.get('day_name', 'N/A')} ({'weekend' if market_status.get('is_weekend') else 'weekday'})
+    - Session Hours: {market_status.get('session_hours_ist', '09:15 - 15:30 IST, Mon-Fri')}
     - Current Time: {market_status.get('current_time_ist', 'N/A')}
-    - Next Open: {market_status.get('next_open_ist', 'N/A')}
+    - Next Open: {market_status.get('next_open_day', '')} {market_status.get('next_open_ist', 'N/A')}
     - Today Close: {market_status.get('today_close_ist', 'N/A')}
     - Note: {market_status.get('reason', 'N/A')}""")
 
@@ -174,9 +246,11 @@ Use the OI walls as the real support/resistance, and max pain as the expiry magn
     6. Risk rules: max loss, no revenge trade, position sizing
     7. ⚠️ Warning: include SEBI's data that 9/10 F&O traders lose money
 
-    If market is CLOSED:
-    - Give "next session preparation" and "opening 15-min observation plan".
-    - No immediate execution command.
+    If market is CLOSED (weekend, before 09:15, or after 15:30):
+    - Say so plainly in the first line, including WHY (Saturday/Sunday, pre-market, or session ended).
+    - Still answer the question fully — analyse the chain, the levels, the setup.
+    - Frame it as "next session preparation" plus an "opening 15-min observation plan".
+    - No immediate execution command, and note that the data is from the last session.
 
     If market is OPEN:
     - You can give actionable setup like "Buy only above X" / "Sell below Y".
@@ -212,6 +286,9 @@ Be specific with prices in ₹. This is for educational purposes only."""
         state["trading_analysis_output"] = {
             "analysis": analysis_text,
             "market_status": market_status,
+            # Prepended verbatim to the final answer by the synthesis agent, so
+            # open/closed never depends on the model remembering to say it.
+            "market_notice": market_notice,
             "options_data": options_data if options_data and "error" not in options_data else None,
         }
 
@@ -222,9 +299,17 @@ Be specific with prices in ₹. This is for educational purposes only."""
         )
 
     except Exception as e:
+        # Market status is a clock lookup, not a network call — it should still
+        # be reported even when the data fetch or the LLM leg failed.
+        try:
+            fallback_status = get_indian_market_status()
+        except Exception:
+            fallback_status = {}
+
         state["trading_analysis_output"] = {
             "analysis": f"Trading agent error: {str(e)[:200]}",
-            "market_status": {},
+            "market_status": fallback_status,
+            "market_notice": build_market_notice(fallback_status),
             "options_data": None,
         }
         state["trace"].append(f"trading_agent → ERROR: {str(e)[:100]}")

@@ -13,6 +13,7 @@
 
 from groq import Groq
 
+from agents.memory import format_history
 from config.models import GROQ_STANDARD
 from config.settings import settings
 
@@ -32,7 +33,12 @@ Hard rules:
 - Use ONLY the data provided below. If a number is missing, say so plainly — never invent prices, NAVs or returns.
 - Never promise or guarantee returns. Describe likelihoods and ranges instead.
 - Do NOT print a confidence score, and do NOT mention agents, tools, pipelines or internal data sources.
-- Do NOT append a disclaimer — one is added automatically afterwards."""
+- Do NOT append a disclaimer — one is added automatically afterwards.
+
+Continuing a conversation:
+- If earlier turns are shown, you are mid-conversation. Answer the new question as a reply, not as a fresh start.
+- Reuse what they already told you — income, holdings, risk appetite — instead of asking again.
+- Don't re-explain what you already covered. Reference it in a few words and move on to what's new."""
 
 # Per-intent guidance on WHAT to cover — deliberately not a rigid template.
 _INTENT_GUIDANCE = {
@@ -152,8 +158,12 @@ def _collect_context(state: dict) -> list:
         if status:
             parts.append(
                 f"MARKET STATUS: {str(status.get('status', 'unknown')).upper()} "
-                f"({status.get('reason', '')}) | IST now: {status.get('current_time_ist', 'N/A')} | "
-                f"Next open: {status.get('next_open_ist', 'N/A')}"
+                f"({status.get('reason', '')}) | Today: {status.get('day_name', 'N/A')} | "
+                f"IST now: {status.get('current_time_ist', 'N/A')} | "
+                f"Session hours: {status.get('session_hours_ist', '09:15-15:30 IST, Mon-Fri')} | "
+                f"Next open: {status.get('next_open_day', '')} {status.get('next_open_ist', 'N/A')}\n"
+                f"A market-status line is prepended to your answer automatically — do NOT "
+                f"repeat it, but keep everything you say consistent with it."
             )
 
         options = trading.get("options_data") or {}
@@ -217,7 +227,12 @@ def run(state: dict) -> dict:
         guidance = _INTENT_GUIDANCE.get(intent, _GENERAL_GUIDANCE)
         system_prompt = f"{_BASE_VOICE}\n\n---\n\n{guidance}"
 
-        user_prompt = f"""The person asked: "{state['raw_query']}"
+        transcript = format_history(state.get("conversation_history") or [], answer_chars=400)
+        history_block = (
+            f"Earlier in this conversation:\n{transcript}\n\n---\n\n" if transcript else ""
+        )
+
+        user_prompt = f"""{history_block}The person asked: "{state['raw_query']}"
 
 What they're trying to figure out: {goal}
 
@@ -240,7 +255,19 @@ Write your answer to them now."""
             max_tokens=1600,
         )
 
-        state["recommendation"] = response.choices[0].message.content.strip()
+        answer = response.choices[0].message.content.strip()
+
+        # Whether the market is open is a clock fact, so it is prepended here
+        # rather than left to the model. Someone asking about an option trade at
+        # 3:30pm or on a Saturday still gets the full answer — they just get it
+        # with the session status stated up front, every time.
+        trading = state.get("trading_analysis_output")
+        if isinstance(trading, dict):
+            notice = trading.get("market_notice")
+            if notice:
+                answer = f"{notice}\n\n{answer}"
+
+        state["recommendation"] = answer
 
         # Confidence now comes from the review gate's data-quality assessment
         # rather than asking the model to grade itself in the visible answer.

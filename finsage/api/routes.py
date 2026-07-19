@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
 from agents.graph import app_graph
+from agents import memory
 from db.database import get_db
 from db.crud import save_query_log, get_recent_queries
 from mcp_bridge import has_live_session, get_tools
@@ -40,11 +41,28 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     try:
+        # ── Working memory: every earlier turn of this session ──
+        # A session is 5 messages and all 5 are replayed, so the last question
+        # can still refer back to the first. On a cold process the turns are
+        # rebuilt from query_logs rather than lost.
+        history = memory.get_history(request.user_id)
+        if not history:
+            try:
+                history = memory.hydrate(
+                    request.user_id,
+                    get_recent_queries(db, request.user_id, limit=memory.MAX_TURNS),
+                )
+            except Exception:
+                history = []   # memory is an enhancement, never a hard dependency
+
         # Build initial FinSageState with all fields set to zero/None/empty values
         initial_state = {
             # Identity
             "user_id": request.user_id,
             "raw_query": request.query.strip(),
+
+            # Working memory (populated above)
+            "conversation_history": history,
 
             # Supervisor outputs (populated by supervisor_agent)
             "goal": "",
@@ -110,6 +128,14 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         if plan:
             trace = [f"📋 Plan: {' → '.join(plan[:6])}"] + trace
 
+        # Record the turn so the next message in this session can refer to it.
+        memory.remember(
+            user_id=request.user_id,
+            query=request.query.strip(),
+            answer=recommendation,
+            intent=intent,
+        )
+
         # Save to database
         try:
             save_query_log(
@@ -159,9 +185,20 @@ def health():
     except Exception as exc:
         rag_status = {"vector_store": "pinecone", "connected": False, "error": str(exc)[:150]}
 
+    # Surface which guardrail engine is live. If NeMo failed to load the app
+    # still runs on the local fallback, and that should be visible here rather
+    # than only inferrable from the trace.
+    try:
+        from agents.nemo_rails import status as guardrails_status
+        rails_status = guardrails_status()
+    except Exception as exc:
+        rails_status = {"engine": "unknown", "active": False, "error": str(exc)[:150]}
+
     return {
         "status": "ok",
         "version": "0.5.0",
+        "guardrails": rails_status,
+        "conversation_memory": {"max_turns": memory.MAX_TURNS, "scope": "per user_id session"},
         "architecture": "supervisor-staged-parallel",
         "mcp_transport": "in-memory (fastmcp)",
         "mcp_connected": has_live_session(),

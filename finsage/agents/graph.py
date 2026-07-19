@@ -8,7 +8,9 @@
 #                 └─ smalltalk/block ──→ direct_reply → END
 #
 # Latency changes vs v3:
-#   - Guardrails are local string checks, not two extra LLM generations.
+#   - Guardrails run through NVIDIA NeMo Guardrails (guardrails/rails.co), but
+#     the rails execute deterministic Python actions rather than NeMo's stock
+#     self_check_* prompts, so they cost no extra LLM generations.
 #   - Small talk ("hi", "what can you do") short-circuits the entire pipeline.
 #   - Agents WITHIN a stage now run in parallel threads. They are independent
 #     by construction (that is what the stage split encodes), so running them
@@ -36,7 +38,7 @@ import agents.synthesis_agent as synthesis_agent
 import agents.tax_agent as tax_agent
 import agents.technical_agent as technical_agent
 import agents.trading_agent as trading_agent
-from agents.guardrail import classify, sanitize_output
+from agents.nemo_rails import check_input, check_output
 from agents.state import FinSageState
 
 # ── Agent registry: maps agent names to their run() functions ──
@@ -174,8 +176,12 @@ def run_stage_3(state: dict) -> dict:
 # ── Guardrail nodes ───────────────────────────────────────────
 
 def guardrail_in(state: dict) -> dict:
-    """Local input gate: allow, answer small talk directly, or refuse."""
-    verdict = classify(state.get("raw_query", ""))
+    """NeMo input rail: allow, answer small talk directly, or refuse."""
+    verdict = check_input(
+        state.get("raw_query", ""),
+        # Follow-ups are judged against the thread, not in isolation.
+        history=state.get("conversation_history") or [],
+    )
     action = verdict["action"]
 
     state["guardrail_action"] = action
@@ -184,7 +190,9 @@ def guardrail_in(state: dict) -> dict:
     if action != "allow":
         state["input_reject_reason"] = verdict["reply"]
 
-    state["trace"].append(f"guardrail_in → {action} ({verdict['reason']})")
+    state["trace"].append(
+        f"guardrail_in [{verdict.get('engine', 'nemo')}] → {action} ({verdict['reason']})"
+    )
     return state
 
 
@@ -205,7 +213,7 @@ def direct_reply(state: dict) -> dict:
 
 
 def guardrail_out(state: dict) -> dict:
-    """Local output gate: soften certainty language and guarantee a disclaimer."""
+    """NeMo output rail: soften certainty language and guarantee a disclaimer."""
     recommendation = state.get("recommendation", "")
 
     if not recommendation or not recommendation.strip():
@@ -213,7 +221,7 @@ def guardrail_out(state: dict) -> dict:
         state["trace"].append("guardrail_out → skipped (no recommendation)")
         return state
 
-    cleaned, modified = sanitize_output(recommendation)
+    cleaned, modified = check_output(recommendation)
     state["recommendation"] = cleaned
     state["output_safe"] = True
     state["trace"].append(f"guardrail_out → {'adjusted' if modified else 'clean'}")

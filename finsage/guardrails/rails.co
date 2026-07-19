@@ -1,0 +1,47 @@
+# guardrails/rails.co
+# Colang flows for the FinSage guardrails.
+#
+# The policy itself lives in agents/guardrail.py and reaches these flows through
+# two registered NeMo actions. Keeping the decision logic in Python and the
+# control flow in Colang means the rails are auditable here without paying for
+# an LLM classification pass on every message.
+
+
+# The refusal / small-talk text is produced by the policy, not hardcoded per
+# intent, so a single bot message renders whatever the action decided to say.
+define bot deliver finsage verdict
+  "{{ finsage_reply }}"
+
+
+# ── Input rail ────────────────────────────────────────────────
+# finsage_input_check returns one of three actions:
+#   "allow"     — let the message through to the agent pipeline
+#   "smalltalk" — answer conversationally right here, skip the pipeline
+#   "block"     — refuse (hacking, prompt injection, clearly off-topic)
+#
+# Only "allow" continues. The other two stop the rail and return the reply,
+# which is what keeps greetings cheap and injections from ever reaching an agent.
+define flow finsage input policy
+  $verdict = execute finsage_input_check
+
+  $finsage_action = $verdict["action"]
+  $finsage_reason = $verdict["reason"]
+
+  if $verdict["action"] != "allow"
+    $finsage_reply = $verdict["reply"]
+    bot deliver finsage verdict
+    stop
+
+
+# ── Output rail ───────────────────────────────────────────────
+# finsage_output_check softens certainty language ("guaranteed returns" ->
+# "potential returns") and guarantees the SEBI educational disclaimer is
+# present. It rewrites rather than blocks: a refused answer helps nobody, a
+# reworded one still answers the question within compliance.
+define flow finsage output policy
+  $result = execute finsage_output_check
+
+  $finsage_output_modified = $result["modified"]
+
+  if $result["modified"]
+    $bot_message = $result["text"]

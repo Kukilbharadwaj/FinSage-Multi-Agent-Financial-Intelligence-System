@@ -1,0 +1,38 @@
+# guardrails/config.yml
+# NVIDIA NeMo Guardrails configuration for FinSage.
+#
+# Design note — why `models` is empty:
+#   NeMo's stock `self_check_input` / `self_check_output` rails each run a FULL
+#   LLM generation to classify a message. That cost two extra round trips on
+#   every query, and the classifier prompt routinely flagged ordinary openers
+#   ("hi", "what can you do?") as off-topic, so the assistant could not even
+#   introduce itself.
+#
+#   Instead, the flows in rails.co call FinSage's own policy through custom
+#   NeMo actions (`finsage_input_check` / `finsage_output_check`, registered in
+#   agents/nemo_rails.py). NeMo still owns the decision flow, dialog state and
+#   the stop/rewrite semantics — it just executes deterministic Python instead
+#   of prompting a model. That is why no LLM engine is configured here: the
+#   rails never generate, they only decide.
+#
+#   Both rails are invoked with GenerationOptions(rails=["input"]) and
+#   (rails=["output"]) respectively, so NeMo never attempts its own generation.
+
+models: []
+
+instructions:
+  - type: general
+    content: |
+      FinSage is an Indian personal finance assistant. It answers questions on
+      markets, trading, mutual funds, tax, salary planning, insurance, loans and
+      retirement, and it holds normal conversation (greetings, capability
+      questions, thanks, goodbyes) without refusing.
+
+rails:
+  input:
+    flows:
+      - finsage input policy
+
+  output:
+    flows:
+      - finsage output policy
